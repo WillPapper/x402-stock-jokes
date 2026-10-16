@@ -117,6 +117,8 @@ export function createAiRunFetch(options: X402AiGatewayOptions): typeof fetch {
 		if ('messages' in rest) rest.messages = normalizeMessagesForWorkersAi(rest.messages);
 		// Orchestration turns are tool routing; keep gpt-oss reasoning short and cheap.
 		if (typeof model === 'string' && model.startsWith('openai/') && !('reasoning_effort' in rest)) rest.reasoning_effort = 'low';
+		// Thinking models (Qwen 3.8, Gemma 4, GLM 4.7) need room to think before the tool call.
+		if (!('max_tokens' in rest) && !('max_completion_tokens' in rest)) rest.max_tokens = 2048;
 		const res = await options.paidFetch(aiRunUrl, {
 			method: 'POST',
 			headers: { authorization: `Bearer ${options.apiToken}`, 'payment-method': 'x402', 'content-type': 'application/json' },

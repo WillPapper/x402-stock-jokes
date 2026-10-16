@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stock Jokes</title>
+<meta name="description" content="A Flue agent that pays StockTwits, Ceramic and Cloudflare AI Gateway per request with USDC on Base (x402) to write one joke about a stock.">
+<style>
+  :root { --bg:#f6f4ee; --fg:#1d1c1a; --muted:#6b675f; --card:#ffffff; --line:#e4e0d6; --accent:#0d6b5e; --accent-fg:#ffffff; --ok:#1a7f4b; --warn:#a15c00; --err:#b3261e; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; } }
+  :root[data-theme="dark"] { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:40px 16px 64px; }
+  h1 { font-size:28px; margin:0 0 4px; letter-spacing:-0.01em }
+  .sub { color:var(--muted); margin:0 0 28px }
+  form { display:flex; gap:8px; margin-bottom:24px }
+  input { flex:1; font:inherit; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); text-transform:uppercase; min-width:0 }
+  button { font:inherit; font-weight:600; padding:12px 18px; border:0; border-radius:10px; background:var(--accent); color:var(--accent-fg); cursor:pointer }
+  button:disabled { opacity:.55; cursor:default }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin-bottom:16px }
+  .steps { list-style:none; padding:0; margin:0; display:grid; gap:10px }
+  .steps li { display:grid; grid-template-columns:28px 1fr; gap:10px; align-items:start }
+  .dot { width:22px; height:22px; border-radius:50%; border:2px solid var(--line); display:grid; place-items:center; font-size:12px; margin-top:2px }
+  .dot.running { border-color:var(--warn); animation:pulse 1s infinite }
+  .dot.done { border-color:var(--ok); background:var(--ok); color:#fff }
+  .dot.error { border-color:var(--err); background:var(--err); color:#fff }
+  @keyframes pulse { 50% { opacity:.4 } }
+  .step-title { font-weight:600 }
+  .step-detail { color:var(--muted); font-size:14px; word-break:break-word }
+  .joke { font-size:22px; line-height:1.35; margin:0 0 12px; white-space:pre-wrap }
+  .based { color:var(--muted); font-size:15px; margin:0 }
+  table { width:100%; border-collapse:collapse; font-size:14px }
+  th, td { text-align:left; padding:8px 6px; border-top:1px solid var(--line); vertical-align:top }
+  th { color:var(--muted); font-weight:500; border-top:0 }
+  td.num, th.num { text-align:right; font-family:var(--mono); white-space:nowrap }
+  a { color:var(--accent) }
+  .err { color:var(--err); white-space:pre-wrap }
+  .hidden { display:none }
+  footer { color:var(--muted); font-size:13px; margin-top:24px }
+  code { font-family:var(--mono); font-size:13px }
+</style>
+</head>
+<body>
+<main>
+  <h1>Stock Jokes</h1>
+  <p class="sub">One joke per ticker. Every step is an x402 micro-payment in USDC on Base: StockTwits for the chatter, Ceramic for the news, Cloudflare AI Gateway for the punchline, and the agent's own turns.</p>
+
+  <form id="form">
+    <input id="ticker" placeholder="Ticker, e.g. NVDA" maxlength="12" autocomplete="off" required>
+    <button id="go" type="submit">Tell me a joke</button>
+  </form>
+
+  <section class="card">
+    <ol class="steps" id="steps">
+      <li><span class="dot" data-step="orchestrator"></span><div><div class="step-title">Agent thinks (AI Gateway, x402)</div><div class="step-detail">Waiting for a ticker.</div></div></li>
+      <li><span class="dot" data-step="fetch_stocktwits_signals"></span><div><div class="step-title">1. StockTwits chatter (x402)</div><div class="step-detail"></div></div></li>
+      <li><span class="dot" data-step="search_stock_news"></span><div><div class="step-title">2. Ceramic news search (x402)</div><div class="step-detail"></div></div></li>
+      <li><span class="dot" data-step="write_joke"></span><div><div class="step-title">3. Joke from AI Gateway (x402)</div><div class="step-detail"></div></div></li>
+    </ol>
+  </section>
+
+  <section class="card hidden" id="result">
+    <p class="joke" id="joke"></p>
+    <p class="based" id="based"></p>
+    <p class="err hidden" id="error"></p>
+  </section>
+
+  <section class="card hidden" id="payments">
+    <table>
+      <thead><tr><th>Payment</th><th>Scheme</th><th class="num">USDC</th><th>Receipt</th></tr></thead>
+      <tbody id="rows"></tbody>
+      <tfoot><tr><th>Total authorized</th><th></th><th class="num" id="total"></th><th></th></tr></tfoot>
+    </table>
+    <p class="step-detail" style="margin:10px 0 0">"upto" rows are ceilings authorized to AI Gateway; the settled cost is usually well under a cent. "exact" rows settle on Base immediately.</p>
+  </section>
+
+  <footer id="wallet">Loading wallet…</footer>
+</main>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const form = $('#form'), input = $('#ticker'), go = $('#go');
+  const dots = Object.fromEntries([...document.querySelectorAll('.dot')].map((d) => [d.dataset.step, d]));
+  let timer = null;
+
+  fetch('/api/wallet').then((r) => r.json()).then((w) => {
+    $('#wallet').innerHTML = `Paying from <a href="${w.basescan}" target="_blank" rel="noopener">${w.address.slice(0, 6)}…${w.address.slice(-4)}</a> on Base · ${Number(w.usdc).toFixed(3)} USDC left${w.permit2Approved ? '' : ' · <span class="err">Permit2 not approved</span>'}`;
+  }).catch(() => { $('#wallet').textContent = 'Wallet status unavailable.'; });
+
+  function setStep(name, state, detail) {
+    const dot = dots[name]; if (!dot) return;
+    dot.className = 'dot ' + state;
+    dot.textContent = state === 'done' ? '✓' : state === 'error' ? '!' : '';
+    if (detail !== undefined) dot.parentElement.querySelector('.step-detail').textContent = detail;
+  }
+  function reset() {
+    for (const k of Object.keys(dots)) setStep(k, '', '');
+    setStep('orchestrator', 'running', 'Sending your request…');
+    $('#result').classList.add('hidden'); $('#payments').classList.add('hidden'); $('#error').classList.add('hidden');
+    $('#joke').textContent = ''; $('#based').textContent = ''; $('#rows').innerHTML = '';
+  }
+  function money(x) { return Number(x).toFixed(6); }
+
+  function render(snapshot) {
+    let joke = '', based = '', payments = [], total = null, failed = null;
+    for (const m of snapshot.messages || []) {
+      for (const p of m.parts || []) {
+        if (p.type === 'dynamic-tool') {
+          const out = p.output || {};
+          if (p.state === 'output-available') {
+            let d = '';
+            if (p.toolName === 'fetch_stocktwits_signals') d = `${out.title || out.symbol}: last ${out.latestPrice ? '$' + out.latestPrice : 'n/a'}, ${out.bullish} bullish / ${out.bearish} bearish of ${out.messagesSampled} posts`;
+            else if (p.toolName === 'search_stock_news') d = (out.results || []).slice(0, 2).map((r) => r.title).join(' · ');
+            else if (p.toolName === 'write_joke') d = `${out.model}`;
+            setStep(p.toolName, 'done', d);
+          } else if (p.state === 'output-error') setStep(p.toolName, 'error', (p.errorText || 'failed').slice(0, 200));
+          else setStep(p.toolName, 'running', 'Paying and fetching…');
+        }
+        if (p.type === 'text' && m.role === 'assistant') {
+          const lines = p.text.split('\n').map((l) => l.trim()).filter(Boolean);
+          const basedIdx = lines.findIndex((l) => /^based on:/i.test(l));
+          joke = (basedIdx > 0 ? lines.slice(0, basedIdx) : lines.filter((l) => !/^(paid|total):/i.test(l))).join('\n');
+          based = basedIdx >= 0 ? lines[basedIdx] : '';
+        }
+      }
+      if (m.metadata && Array.isArray(m.metadata.payments)) { payments = m.metadata.payments; total = m.metadata.totalAuthorizedUsdc; }
+    }
+    const settlement = (snapshot.settlements || [])[0];
+    if (settlement && settlement.outcome !== 'completed') failed = settlement.error && settlement.error.message || settlement.outcome;
+
+    if (joke) { $('#joke').textContent = joke; $('#based').textContent = based; $('#result').classList.remove('hidden'); }
+    if (payments.length) {
+      $('#rows').innerHTML = payments.map((p) => `<tr><td>${p.label}</td><td>${p.scheme}</td><td class="num">${money(p.authorizedUsdc)}</td><td>${p.tx ? `<a href="${p.tx}" target="_blank" rel="noopener">Basescan</a>` : (p.scheme === 'upto' ? 'settled by AI Gateway' : '—')}</td></tr>`).join('');
+      $('#total').textContent = money(total || 0);
+      $('#payments').classList.remove('hidden');
+    }
+    if (settlement) {
+      setStep('orchestrator', failed ? 'error' : 'done', failed ? 'Failed' : `${payments.filter((p) => p.label.includes('orchestrator')).length} paid model turns`);
+      if (failed) { $('#error').textContent = failed; $('#error').classList.remove('hidden'); $('#result').classList.remove('hidden'); }
+      return true;
+    }
+    setStep('orchestrator', 'running', 'Thinking (each turn is an x402 payment)…');
+    return false;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ticker = input.value.trim().toUpperCase(); if (!ticker) return;
+    clearInterval(timer); reset(); go.disabled = true;
+    const id = 'web-' + Math.random().toString(16).slice(2, 10);
+    const url = `/agents/joker/${id}`;
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'user', body: `Tell me a joke about ${ticker}.` }) });
+      if (!res.ok) throw new Error(`POST ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    } catch (err) { setStep('orchestrator', 'error', String(err.message || err)); go.disabled = false; return; }
+    const started = Date.now();
+    timer = setInterval(async () => {
+      try {
+        const snap = await (await fetch(url)).json();
+        if (render(snap) || Date.now() - started > 180000) { clearInterval(timer); go.disabled = false; }
+      } catch (err) { /* transient; keep polling */ }
+    }, 1500);
+  });
+})();
+</script>
+</body>
+</html>

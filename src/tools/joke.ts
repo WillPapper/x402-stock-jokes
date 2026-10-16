@@ -33,11 +33,11 @@ export async function writeJokeFor(symbol: string, facts: string[], model = conf
 					{ role: 'system', content: SYSTEM },
 					{ role: 'user', content: `Ticker: ${symbol}\nFacts:\n${facts.map((f) => `- ${f}`).join('\n')}` },
 				],
-				// GLM 4.7 Flash always "thinks" first (about 1,000 tokens) before the
-				// joke; gpt-oss models honor a low reasoning effort instead.
-				max_tokens: 1800,
+				max_tokens: 600,
 				temperature: 0.9,
-				...(model.startsWith('openai/') ? { reasoning_effort: 'low' } : {}),
+				// Thinking models (Gemma 4, Qwen 3.8, GLM 4.7) otherwise spend the whole
+				// budget reasoning about the joke; gpt-oss honors reasoning_effort instead.
+				...(model.startsWith('openai/') ? { reasoning_effort: 'low' } : { chat_template_kwargs: { enable_thinking: false } }),
 			},
 		}),
 	});

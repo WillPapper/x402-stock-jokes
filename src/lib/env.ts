@@ -35,16 +35,16 @@ export const config = {
 		return (pk.startsWith('0x') ? pk : `0x${pk}`) as `0x${string}`;
 	},
 	get orchestratorModel() {
-		return e.ORCHESTRATOR_MODEL ?? 'openai/gpt-oss-20b';
+		return e.ORCHESTRATOR_MODEL ?? 'alibaba/qwen3.8-27b';
 	},
 	get jokeModel() {
-		return e.JOKE_MODEL ?? 'z-ai/glm-4.7-flash';
+		return e.JOKE_MODEL ?? 'google/gemma-4-26b-a4b-it';
 	},
 	get maxUsdPerDataCall() {
 		return e.MAX_USDC_PER_DATA_CALL ?? '0.01';
 	},
 	get maxUsdPerInference() {
-		return e.MAX_USDC_PER_INFERENCE ?? '0.10';
+		return e.MAX_USDC_PER_INFERENCE ?? '0.25';
 	},
 	get maxUsdPerIsolate() {
 		return e.MAX_USDC_PER_ISOLATE ?? '5';

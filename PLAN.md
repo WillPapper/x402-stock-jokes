@@ -1,6 +1,6 @@
 # x402 Stock Jokes — Implementation Plan
 
-Status: **revised after review, 2026-10-15.** Decisions from review are folded in (section 6). Nothing is built yet.
+Status: **built and verified locally, 2026-10-16.** Steps 0–10 done; step 11 (deploy) in progress. Section 8 records what changed during implementation.
 
 ## 1. Goal
 
@@ -130,3 +130,12 @@ Expected cost per joke: 0.002 (StockTwits) + 0.001 (Ceramic) + 3–4 orchestrato
 - `@x402/*` and `viem` inside workerd with `nodejs_compat`: expected to work (pure-JS crypto), verified in step 3.
 - StockTwits preview: staging, no SLA, geo-fenced by the Worker's egress country, not yours. Known at step 10.
 - Durable Object retries and payments: covered by `step.do`; the orchestrator turns are not inside `step.do`, so an interrupted turn may be re-run and paid again. Flue only retries when it can prove the provider call did not complete, which bounds this to one extra turn.
+
+## 8. Implementation log (2026-10-16)
+
+- **AI Gateway x402 is `upto` + Permit2.** Added `UptoEvmScheme`, a one-time `scripts/approve-permit2.ts`, and ETH-for-gas to the wallet checklist. No `PAYMENT-RESPONSE` receipt comes back from AI Gateway; settlement is visible only as wallet balance.
+- **`/ai/run` facts:** returns `{ result: <OpenAI chat.completion>, success }`; `tools` work; `stream: true` yields an empty result; message `content` must be a string. The provider shim (`src/lib/ai-gateway-provider.ts`) rewrites, pays, normalizes, and replays the completion as SSE.
+- **StockTwits preview reality:** only `symbols/show` is served; `symbols/trending` and other `symbols/*` paths 402 then 404 at the origin (not charged). Step 1 pays for `symbols/show` and reads the free `streams/symbol` on the same gateway for prices and bull/bear counts.
+- **Models (per review on 2026-10-16):** orchestrator `alibaba/qwen3.8-27b`, joke `google/gemma-4-26b-a4b-it`. Thinking models burn the whole budget reasoning unless `chat_template_kwargs: { enable_thinking: false }` is sent (works for Gemma and Qwen; `thinking`/`reasoning_effort` flags are ignored). Qwen's ceiling is ≈ 0.13 USDC per turn, so `MAX_USDC_PER_INFERENCE` is 0.25.
+- **Agent guardrails:** the agent may only output a joke returned by `write_joke`; tool retries are capped by instruction; an earlier run retried a failing joke call seven times before the facilitator refused.
+- **Bun** replaced the npm lockfile; the Workers AI binding was removed so `vite dev` runs without a wrangler login.

@@ -8,13 +8,16 @@ This is a [Flue](https://flueframework.com) project: agents are TypeScript funct
 - `src/app.ts` — the route map; every route is mounted here explicitly.
 - `src/cloudflare.ts` — Worker-level exports and non-HTTP handlers.
 - `wrangler.jsonc` — Worker config; every agent needs a Durable Object migration entry.
+- `src/lib/` — x402 client, budget, ledger, and the pi-ai provider that pays AI Gateway for the agent's own turns.
+- `src/tools/` — the three paid steps (StockTwits, Ceramic, AI Gateway joke).
+- Every tool call and model turn spends real USDC; keep caps in `wrangler.jsonc` vars small and run `bun run doctor` first.
 
 ## Commands
 
-- `npx flue run src/agents/joker.ts --message "Tell me a joke about NVDA."` — run an agent locally, no server.
-- `npm run dev` — start the dev server.
-- `npm run deploy` — build and deploy the Worker.
-- `npm run check:types` — typecheck.
+- `bun run dev` — start the dev server (needs `.dev.vars`, see README).
+- `bun run deploy` — build and deploy the Worker.
+- `bun run check:types` — typecheck; `bun test` — unit tests.
+- `bun run doctor` — check wallet, allowance and the live 402 quotes before spending.
 - `npx flue docs search <query>` — search the Flue docs from the terminal (then `flue docs read <path>`).
 - `npx flue add` — list blueprints for adding channels, sandboxes, and databases.
 
