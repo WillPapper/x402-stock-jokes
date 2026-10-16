@@ -13,6 +13,7 @@ interface Bindings {
 	MAX_USDC_PER_ISOLATE?: string;
 	ORCHESTRATOR_MODEL?: string;
 	JOKE_MODEL?: string;
+	ALCHEMY_API_KEY?: string;
 }
 
 // `env` from cloudflare:workers is live, so reads happen at call time, never at module load.
@@ -49,6 +50,9 @@ export const config = {
 	},
 	get maxUsdPerIsolate() {
 		return e.MAX_USDC_PER_ISOLATE ?? '5';
+	},
+	get alchemyKey() {
+		return e.ALCHEMY_API_KEY ?? null;
 	},
 	get aiRunUrl() {
 		return `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/ai/run`;

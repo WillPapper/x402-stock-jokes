@@ -92,15 +92,15 @@
     <ol class="howto">
       <li>Your agent needs a wallet with a little USDC on <b>Base mainnet</b> (no ETH needed).</li>
       <li>Copy the instructions and paste them to your agent. They explain the 402 → sign → retry flow and how to read the joke back.</li>
-      <li>It POSTs to <code id="payurl"></code>, pays 0.10 USDC, polls, and shows you the joke, the facts and the receipts.</li>
+      <li>It POSTs to <code id="payurl"></code>, pays 0.10 USDC, polls the returned URL, and shows you the joke, the facts and the receipts.</li>
     </ol>
     <div class="actions"><button type="button" id="copy-pay">Copy instructions for my agent</button> <a class="linkbtn" href="/agent.md" target="_blank" rel="noopener">Open agent.md</a> <span class="step-detail" id="copied"></span></div>
     <details><summary class="step-detail">Minimal TypeScript</summary><pre id="paycurl"></pre></details>
     <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
-    <div class="step-title">Or use the shared password for free</div>
+    <div class="step-title">Or use a coupon code for a free joke</div>
     <form class="pwrow" id="pwform">
-      <input id="password" type="text" placeholder="Password" autocomplete="off" spellcheck="false">
-      <button type="submit" id="usepw">Use password</button>
+      <input id="password" type="text" placeholder="Coupon code" autocomplete="off" spellcheck="false">
+      <button type="submit" id="usepw">Use coupon</button>
     </form>
     <p class="err hidden" id="pwerr" style="margin:8px 0 0"></p>
     <div id="cachedwrap" class="hidden">
@@ -113,8 +113,8 @@
   <h2>Live feed</h2>
   <div class="stats">
     <div class="stat"><b id="s-count">–</b><span>jokes so far</span></div>
-    <div class="stat"><b id="s-tickers">–</b><span>tickers</span></div>
-    <div class="stat"><b id="s-usdc">–</b><span>USDC authorized</span></div>
+    <div class="stat"><b id="s-paid">–</b><span>USDC paid on-chain <span id="s-paid-detail" class="muted"></span></span></div>
+    <div class="stat"><b id="s-earned">–</b><span>USDC earned from x402 jokes</span></div>
   </div>
   <div class="card"><div class="step-detail">Jokes per hour, last 24h</div><svg class="spark" id="spark" viewBox="0 0 240 48" preserveAspectRatio="none" aria-label="jokes per hour"></svg></div>
   <div class="feed" id="feed"><p class="muted" id="feedempty">No jokes yet.</p></div>
@@ -132,6 +132,7 @@
   const money = (x) => Number(x || 0).toFixed(4);
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const PUBLIC = 'https://jokes.papper.me';
+  let WALLET = '';
   let timer = null;
 
 
@@ -151,6 +152,7 @@
   $('#copy-pay').addEventListener('click', () => copyInstructions($('#copied')));
 
   fetch('/api/wallet').then((r) => r.json()).then((w) => {
+    WALLET = w.address;
     $('#wallet').innerHTML = `Paying from <a href="${w.basescan}" target="_blank" rel="noopener">${w.address.slice(0, 6)}…${w.address.slice(-4)}</a> on Base${w.usdc != null ? ` · ${Number(w.usdc).toFixed(3)} USDC left` : ''}${w.permit2Approved === false ? ' · <span class="err">Permit2 not approved</span>' : ''}`;
   }).catch(() => { $('#wallet').textContent = 'Wallet status unavailable.'; });
 
@@ -211,11 +213,18 @@
     return false;
   }
 
-  function showPaywall(body, sym, pwError, convUrl) {
-    const url = (body.pay && body.pay.url) || convUrl || `${PUBLIC}/agents/joke/<id>`;
+  async function showRunCost(sym) {
+    try {
+      const { joke } = await (await fetch(`/api/jokes/latest?ticker=${sym}`)).json();
+      if (!joke || !joke.paid || Date.now() - Date.parse(joke.createdAt) > 600000) return;
+      $('#based').textContent += `\nPaid on-chain: ${joke.paid.totalUsdc.toFixed(4)} USDC (StockTwits + Ceramic ${joke.paid.exactUsdc.toFixed(4)}, AI Gateway ${joke.paid.aiUsdc.toFixed(4)}).`;
+    } catch {}
+  }
+  function showPaywall(body, sym, pwError) {
+    const url = `${PUBLIC}/joke/${sym}`;
     $('#payurl').textContent = url; $('#paysym').textContent = sym;
     $('#pwerr').classList.toggle('hidden', !pwError); $('#pwerr').textContent = pwError || '';
-    $('#paycurl').textContent = `# any x402 client works; with @x402/fetch:\nconst res = await fetchWithPayment("${url}", {\n  method: "POST", headers: { "content-type": "application/json" },\n  body: JSON.stringify({ kind: "user", body: "Tell me a joke about ${sym}." })\n});\n// then GET the same URL to read the joke`;
+    $('#paycurl').textContent = `// any x402 client works; with @x402/fetch:\nconst res = await fetchWithPayment("${url}", { method: "POST" });   // pays 0.10 USDC\nconst { poll } = await res.json();\n// then GET poll every few seconds until done === true; the JSON has joke, basedOn, steps, payments`;
     const cached = body.cached;
     if (cached) {
       $('#cachedticker').textContent = cached.ticker; $('#cachedjoke').textContent = cached.joke;
@@ -223,7 +232,7 @@
       $('#cachedwrap').classList.remove('hidden');
     }
     $('#paywall').classList.remove('hidden');
-    setStep('orchestrator', 'error', pwError ? 'Not started: wrong password.' : 'Not started: pay 0.10 USDC or use the password.');
+    setStep('orchestrator', 'error', pwError ? 'Not started: wrong coupon code.' : 'Not started: pay 0.10 USDC or use a coupon code.');
     if (pwError) password.focus();
   }
 
@@ -239,7 +248,7 @@
         let body = {}; try { body = await res.json(); } catch {}
         if (res.status === 401) savePassword('');
         if (!body.cached) { try { body.cached = (await (await fetch(`/api/jokes/latest?ticker=${sym}`)).json()).joke; } catch {} }
-        showPaywall(body, sym, res.status === 401 ? (body.message || 'Wrong password.') : null, PUBLIC + url);
+        showPaywall(body, sym, res.status === 401 ? (body.message || 'Wrong coupon code.') : null);
         go.disabled = false; return;
       }
       if (!res.ok) throw new Error(`POST ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -249,7 +258,7 @@
     timer = setInterval(async () => {
       try {
         const snap = await (await fetch(url)).json();
-        if (render(snap) || Date.now() - started > 240000) { clearInterval(timer); go.disabled = false; refreshFeed(); }
+        if (render(snap) || Date.now() - started > 240000) { clearInterval(timer); go.disabled = false; refreshFeed(); setTimeout(() => showRunCost(sym), 4000); }
       } catch {}
     }, 1500);
   }
@@ -278,7 +287,7 @@
     el.innerHTML = `<div class="meta"><span><span class="ticker">${esc(j.ticker)}</span>${j.title ? ' · ' + esc(j.title) : ''}</span><span title="${when.toISOString()}">${when.toLocaleString()}${j.paidBy === 'x402' ? ' · paid via x402' : ''}</span></div>
       <p class="joke">${esc(j.joke)}</p>
       <div class="step-detail">${esc((j.facts || []).slice(0, 3).join(' · '))}</div>
-      <div class="receipts">${steps.map((p) => `<span class="chip">${esc(p.label.split(' ')[0])} ${p.tx ? `<a href="${p.tx}" target="_blank" rel="noopener">${money(p.authorizedUsdc)} ↗</a>` : '≤ ' + money(p.authorizedUsdc)}</span>`).join('')}<span class="chip" title="orchestrator turns, upto ceilings">${turns.length} agent turns ≤ ${money(turns.reduce((s, p) => s + Number(p.authorizedUsdc), 0))}</span></div>`;
+      <div class="receipts">${steps.filter((p) => p.tx).map((p) => `<span class="chip">${esc(p.label.split(' ')[0])} <a href="${p.tx}" target="_blank" rel="noopener">${money(p.authorizedUsdc)} ↗</a></span>`).join('')}${j.paid ? `<span class="chip" title="USDC settled to AI Gateway on-chain while this joke ran (${j.paid.aiCount} transfers)"><a href="https://basescan.org/token/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913?a=${encodeURIComponent(WALLET || '')}" target="_blank" rel="noopener">AI Gateway ${j.paid.aiUsdc.toFixed(4)} ↗</a></span><span class="chip"><b>paid ${j.paid.totalUsdc.toFixed(4)} USDC</b></span>` : `<span class="chip">${turns.length + 1} AI Gateway calls</span>`}</div>`;
     return el;
   }
   function sparkline(perHour) {
@@ -290,7 +299,17 @@
     svg.innerHTML = buckets.map((b, i) => `<rect x="${(i * bw + 1).toFixed(1)}" y="${(H - (b.count / max) * (H - 4)).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${((b.count / max) * (H - 4)).toFixed(1)}" rx="1.5" fill="${b.count ? 'var(--accent)' : 'var(--line)'}"><title>${b.key.replace('T', ' ')}:00 — ${b.count}</title></rect>`).join('');
   }
   async function refreshStats() {
-    try { const s = await (await fetch('/api/stats')).json(); $('#s-count').textContent = s.count; $('#s-tickers').textContent = s.tickers; $('#s-usdc').textContent = Number(s.totalAuthorizedUsdc).toFixed(2); sparkline(s.perHour); } catch {}
+    try {
+      const s = await (await fetch('/api/stats')).json();
+      $('#s-count').textContent = s.count;
+      if (s.chain) {
+        $('#s-paid').textContent = s.chain.paidUsdc.toFixed(4);
+        const by = s.chain.paidBySeller || {};
+        $('#s-paid-detail').textContent = '· ' + Object.keys(by).map((k) => `${k} ${by[k].toFixed(4)}`).join(' · ') + ` · ${s.chain.paidCount} transfers`;
+      } else { $('#s-paid').textContent = '–'; $('#s-paid-detail').textContent = '(chain data unavailable)'; }
+      $('#s-earned').textContent = s.chain ? `${s.chain.earnedUsdc.toFixed(2)} (${s.chain.earnedCount} jokes)` : `${Number(s.earnedFromJokesUsdc).toFixed(2)}`;
+      sparkline(s.perHour);
+    } catch {}
   }
   async function refreshFeed() {
     try {

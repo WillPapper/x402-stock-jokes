@@ -33,7 +33,7 @@ export async function checkAccess(request: Request): Promise<Access> {
 	const given = request.headers.get(PASSWORD_HEADER) ?? url.searchParams.get('password');
 	if (given !== null) {
 		if (expected && timingSafeEqual(given, expected)) return { ok: true, by: 'password' };
-		return { ok: false, status: 401, reason: 'wrong password; drop the X-Joke-Password header to pay with x402 instead' };
+		return { ok: false, status: 401, reason: 'wrong coupon code; drop the X-Joke-Password header to pay 0.10 USDC with x402 instead' };
 	}
 
 	const token = request.headers.get(PAYMENT_CONTEXT_HEADER);
@@ -51,15 +51,16 @@ export async function checkAccess(request: Request): Promise<Access> {
 		}
 	}
 
-	return { ok: false, status: 402, reason: 'password or x402 payment required' };
+	return { ok: false, status: 402, reason: 'x402 payment (0.10 USDC) or coupon code required' };
 }
 
 export function paymentRequiredBody(conversationUrl: string) {
 	return {
 		error: 'payment_required',
-		message: `Submitting a joke costs ${PRICE_USDC} USDC on Base via x402, or send the X-Joke-Password header.`,
+		message: `A joke costs ${PRICE_USDC} USDC on Base via x402. Or send a coupon code in the X-Joke-Password header for a free one.`,
 		pay: {
 			url: conversationUrl.replace(/^https?:\/\/[^/]+/, `https://${PUBLIC_HOST}`),
+			simplest: `POST https://${PUBLIC_HOST}/joke/<TICKER> then GET the returned poll URL`,
 			method: 'POST',
 			price: `${PRICE_USDC} USDC`,
 			network: 'eip155:8453',

@@ -1,12 +1,13 @@
 # Secrets for `bun run dev` and the scripts in scripts/. Copy to .dev.vars (gitignored).
-# Production: upload these five with `bunx wrangler secret bulk` (see README "Deploy").
+# Production: upload these six with `bunx wrangler secret bulk` (see README "Deploy").
 # Non-secret settings (models, spend caps) live in wrangler.jsonc `vars`, not here.
 
 CLOUDFLARE_ACCOUNT_ID=         # `cf accounts list` or `wrangler whoami`
 CLOUDFLARE_API_TOKEN=          # Account > Workers AI > Read (+ AI Gateway > Run)
 EVM_BASE_ADDRESS=              # `bun run wallet:new` fills these two, or paste your own
 EVM_BASE_PRIVATE_KEY=          # 0x-prefixed; fund the address with USDC + a little ETH on Base mainnet
-JOKE_PASSWORD=                 # lets a caller submit jokes for free via the X-Joke-Password header
+JOKE_PASSWORD=                 # the coupon code: lets a caller submit jokes for free via the X-Joke-Password header
+ALCHEMY_API_KEY=               # Alchemy app key with Base Mainnet enabled; wallet USDC history for the "USDC paid" stats
 
 # Optional, scripts only: RPC used for balance checks and the Permit2 approval.
 # BASE_RPC_URL=https://mainnet.base.org

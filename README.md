@@ -43,12 +43,14 @@ They apply in `bun run dev`, in production, and in the scripts, which read `wran
 
 ## Who can submit a joke
 
-A `POST /agents/joke/:id` spends real money, so it needs one of:
+Submitting a joke (`POST /joke/<TICKER>` or `POST /agents/joke/<id>`) spends real money, so it needs one of:
 
-- the password, in the `X-Joke-Password` header (or `?password=`), stored as the `JOKE_PASSWORD` secret; or
+- a coupon code, in the `X-Joke-Password` header (or `?password=`), stored as the `JOKE_PASSWORD` secret; or
 - an x402 payment of **0.10 USDC** to the app, handled by Cloudflare's Monetization Gateway in front of `jokes.papper.me`. The gateway answers the first request with a real x402 `402` quote, verifies the signed USDC authorization on the retry, and forwards the request with a signed `PAYMENT-CONTEXT` JWT that the Worker verifies against `https://payments.cloudflare.com/certs` (`src/lib/access.ts`).
 
-Neither present: the Worker answers `402` with instructions and the latest cached joke for that ticker, so curious visitors still get a laugh without paying. Reading a conversation (`GET`), the feed and the stats are always free.
+Neither present: the gateway answers `402` with the x402 quote (and, off the gateway, the Worker answers `402` with instructions and the latest cached joke). Reading a conversation or a joke status (`GET`), the feed and the stats are always free.
+
+**Simple API for agents:** `POST https://jokes.papper.me/joke/NVDA` (no body) returns `202 { id, poll }`; `GET` the `poll` URL until `done` is true to get `joke`, `basedOn`, `steps` and `payments`. Full instructions, including the x402 flow and a TypeScript example, are served at [jokes.papper.me/agent.md](https://jokes.papper.me/agent.md); the page's "Copy instructions for my agent" button copies them with the ticker filled in.
 
 Gateway rule on the `papper.me` zone (dashboard, or `cf monetization rules update`; the API form is a Wirefilter expression):
 
@@ -56,13 +58,15 @@ Gateway rule on the `papper.me` zone (dashboard, or `cf monetization rules updat
 http.host eq "jokes.papper.me" and starts_with(http.request.uri.path, "/agents/joke/")
   and http.request.method eq "POST" and not len(http.request.headers["x-joke-password"]) > 0
 ```
-Fixed price `$0.10` (`exact`), audience Everyone, receiving wallet = the app wallet, so revenue tops up what the app spends. The rule charges whenever the header is *absent*; the Worker checks the header's *value*, so a wrong password is a 401, not a free ride.
+Fixed price `$0.10` (`exact`), audience Everyone, receiving wallet = the app wallet, so revenue tops up what the app spends. The rule matches both `/agents/joke/` and `/joke/` and charges whenever the header is *absent*; the Worker checks the header's *value*, so a wrong coupon code is a 401, not a free ride.
 
 Verified 2026-10-16: an unpaid POST gets the gateway's 402 with a 0.10 USDC quote; `bun scripts/pay-for-joke.ts TSLA` from a second wallet paid it ([tx](https://basescan.org/tx/0x140f1cc2580e8a7771d6e55e5cd248715bc7ade6142549174c775df32634725c)), the Worker accepted the signed `PAYMENT-CONTEXT`, and the joke was stored with `paidBy: "x402"`. Paying from the app's own wallet is refused by the facilitator ("facilitator rejected verify request"), so use a different wallet to test.
 
 ## The page
 
-`public/index.html`, no framework. Ticker + optional password, then the run: each of the three steps and the agent's turns with a receipt chip (Basescan link for `exact`, ceiling for `upto`), the joke and the facts behind it. Without the password you get the paywall card with an x402 snippet and the cached joke. Below: a live feed of every joke ever made (polled from D1 every 3 s, new ones slide in), counters, and a jokes-per-hour sparkline.
+`public/index.html`, no framework. You enter a ticker, nothing else. The 402 card then offers two paths: copy the agent instructions (your agent pays 0.10 USDC with x402), or type a coupon code for a free joke; a working coupon is remembered in the browser. The run shows each of the three steps and the agent's turns with receipt chips, then the joke and the facts behind it. Below: a live feed of every joke ever made (polled from D1 every 3 s), counters, and a jokes-per-hour sparkline.
+
+**Money numbers come from the chain, not from estimates.** Every x402 payment is a USDC transfer out of the app wallet, so `/api/stats` reads the wallet's USDC history through Alchemy's Transfers API (`ALCHEMY_API_KEY`) and reports **USDC paid on-chain** per seller and the number of x402 jokes sold (from the gateway's `PAYMENT-CONTEXT` amounts). The `upto` scheme never moves the authorized ceiling: AI Gateway settles only the real token cost, within seconds of each call. StockTwits and Ceramic amounts are matched to each joke by transaction hash; AI Gateway settlements by a time window around the joke (so concurrent jokes can share a settlement).
 
 ## Setup
 
@@ -81,7 +85,8 @@ Fill `.dev.vars`:
   cf user tokens create --name x402-stock-jokes --policies '[{"effect":"allow","resources":{"com.cloudflare.api.account.<ACCOUNT_ID>":"*"},"permission_groups":[{"id":"a92d2450e05d4e7bb7d0a64968f83d11","name":"Workers AI Read"},{"id":"644535f4ed854494a59cb289d634b257","name":"AI Gateway Run"}]}]'
   ```
 - `EVM_BASE_ADDRESS` / `EVM_BASE_PRIVATE_KEY`: `bun run wallet:new` creates a dedicated wallet, or paste your own. Keep only a few dollars in it.
-- `JOKE_PASSWORD`: whatever lets your friends skip the paywall.
+- `JOKE_PASSWORD`: the coupon code that lets friends skip the paywall.
+- `ALCHEMY_API_KEY`: an [Alchemy](https://www.alchemy.com) app key with Base Mainnet enabled, for the wallet's USDC history (`/api/stats`, `/api/transfers`).
 
 Then:
 
@@ -129,7 +134,7 @@ await fetchWithPayment("https://jokes.papper.me/agents/joke/my-id", { method: "P
 bunx wrangler login
 bun run db:migrate                  # D1 schema (once per migration)
 bun run deploy                      # vite build && wrangler deploy; creates the jokes.papper.me custom domain
-# upload the five secrets (a JSON object of name → value; keep the file out of git):
+# upload the six secrets (a JSON object of name → value; keep the file out of git):
 bunx wrangler secret bulk secrets.json --name x402-stock-jokes
 ```
 
@@ -138,7 +143,7 @@ bunx wrangler secret bulk secrets.json --name x402-stock-jokes
 ## What's inside
 
 ```
-src/app.ts                     routes: the access gate, /agents/joke, /api/jokes, /api/jokes/latest, /api/stats, /api/wallet, /api/ledger; registers the x402 provider
+src/app.ts                     routes: the access gate, /joke/<TICKER> + /joke/<id> (simple API), /agents/joke, /api/jokes, /api/stats, /api/transfers, /api/wallet; registers the x402 provider
 src/agents/joke.ts             Joke: the Flue agent, its model and tools, payment metadata on every reply, D1 write on finish
 src/tools/stocktwits.ts        step 1 (paid symbols/show + free stream → price, bull/bear counts, sample posts)
 src/tools/ceramic.ts           step 2 (paid search → headlines)
@@ -147,6 +152,7 @@ src/lib/x402.ts                one x402 client (exact + upto), budget-guarded si
 src/lib/ai-gateway-provider.ts the agent's model, paid with x402 through AI Gateway
 src/lib/access.ts              password or Monetization Gateway PAYMENT-CONTEXT check
 src/lib/db.ts                  D1: jokes (insert, feed, per-ticker latest, stats) and access (how each conversation was admitted)
+src/lib/transfers.ts           the wallet's USDC transfers from Alchemy: USDC paid per seller, earned, per-joke settled amounts
 src/lib/budget.ts, ledger.ts   spend caps, payment records
 public/index.html              the page
 migrations/                    D1 schema
@@ -160,7 +166,7 @@ Cost per joke: about 0.002 USDC for data plus a few thousandths of a USDC settle
 ## Operational notes
 
 - **Wallet headroom.** One joke reserves roughly 0.55 USDC in flight while a few thousandths settle. Keep at least 1 USDC in the wallet or the facilitator refuses with `verify returned 403`.
-- **Settlement is invisible per call.** AI Gateway returns no `PAYMENT-RESPONSE` receipt; the only confirmation is the wallet balance going down (`/api/wallet`, or `bun run doctor`).
+- **AI Gateway settles per call, on-chain, for the real token cost** (fractions of a cent, never the ceiling), but returns no `PAYMENT-RESPONSE` receipt. `/api/transfers` lists the settlements.
 - **Secrets are read lazily on purpose.** Workers validate the module at upload time before any secret exists, so nothing in `src/lib/` touches a secret at import. Keep it that way when adding code, or `wrangler deploy` fails with error 10021.
 - **Base RPC rate limits.** Public Base RPCs return 429 to Cloudflare's edge under light load; `/api/wallet` rotates through several and falls back to address-only. Set `BASE_RPC_URL` for the scripts if `mainnet.base.org` throttles you locally.
 - **Reply format drift.** The orchestrator sometimes writes `Based:` instead of `Based on:`; the page accepts both. The D1 row uses the facts passed to `write_joke`, not the reply text.

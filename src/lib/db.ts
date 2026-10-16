@@ -85,20 +85,24 @@ export async function latestJokeFor(ticker: string): Promise<JokeRow | null> {
 export interface JokeStats {
 	count: number;
 	tickers: number;
-	totalAuthorizedUsdc: string;
+	/** Sum of the x402 payments buyers made to this app, from the gateway's PAYMENT-CONTEXT tokens. */
+	earnedFromJokesUsdc: string;
+	paidJokes: number;
 	/** Jokes per hour for the last 24 hours, oldest first; `hour` is an ISO timestamp truncated to the hour. */
 	perHour: { hour: string; count: number }[];
 	latestAt: string | null;
 }
 
 export async function jokeStats(): Promise<JokeStats> {
-	const totals = await db().prepare('SELECT COUNT(*) AS count, COUNT(DISTINCT ticker) AS tickers, COALESCE(SUM(CAST(total_authorized_usdc AS REAL)), 0) AS total, MAX(created_at) AS latest FROM jokes').first<{ count: number; tickers: number; total: number; latest: string | null }>();
+	const totals = await db().prepare('SELECT COUNT(*) AS count, COUNT(DISTINCT ticker) AS tickers, MAX(created_at) AS latest FROM jokes').first<{ count: number; tickers: number; latest: string | null }>();
+	const earned = await db().prepare("SELECT COUNT(*) AS n, COALESCE(SUM(CAST(amount_usdc AS REAL)), 0) AS total FROM access WHERE paid_by = 'x402'").first<{ n: number; total: number }>();
 	const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
 	const { results } = await db().prepare("SELECT substr(created_at, 1, 13) || ':00:00Z' AS hour, COUNT(*) AS count FROM jokes WHERE created_at > ?1 GROUP BY hour ORDER BY hour ASC").bind(since).all<{ hour: string; count: number }>();
 	return {
 		count: totals?.count ?? 0,
 		tickers: totals?.tickers ?? 0,
-		totalAuthorizedUsdc: (totals?.total ?? 0).toFixed(6),
+		earnedFromJokesUsdc: (earned?.total ?? 0).toFixed(6),
+		paidJokes: earned?.n ?? 0,
 		perHour: results,
 		latestAt: totals?.latest ?? null,
 	};
