@@ -52,7 +52,7 @@ Node 26.2, npm 11.13, pnpm and bun present, no global wrangler (use `npx`). Repo
 ```
 src/
   app.ts                     Hono app; mounts the agent at /agents/joker; GET /health; GET /wallet (address + USDC balance)
-  agents/joker.ts            'use agent' — StockJoker: useModel (orchestrator), useTool x3, usePersistentState (spend ledger), instructions
+  agents/joker.ts            'use agent' — StockJoke: useModel (orchestrator), useTool x3, usePersistentState (spend ledger), instructions
   tools/stocktwits.ts        fetch_stocktwits_signals  (durable; 1 paid call + 1 free call)
   tools/ceramic.ts           search_stock_news         (durable; 1–2 paid calls)
   tools/joke.ts              write_joke                (durable; 1 paid AI Gateway call)
@@ -74,7 +74,7 @@ Design decisions baked in (flag if you disagree):
 
 ## 4. Implementation steps
 
-0. **Scaffold** — `npx @flue/cli init` into a scratch dir (repo is non-empty), move generated files in, merge `.gitignore` (add `.dev.vars`, `.flue-vite.wrangler.jsonc`, `dist/`). Install `@x402/core @x402/evm @x402/fetch viem valibot`. Rename hello agent → `StockJoker`, update `wrangler.jsonc` migration class name (`FlueStockJokerAgent`). Commit.
+0. **Scaffold** — `npx @flue/cli init` into a scratch dir (repo is non-empty), move generated files in, merge `.gitignore` (add `.dev.vars`, `.flue-vite.wrangler.jsonc`, `dist/`). Install `@x402/core @x402/evm @x402/fetch viem valibot`. Rename hello agent → `StockJoke`, update `wrangler.jsonc` migration class name (`FlueStockJokeAgent`). Commit.
 1. **Wallet + doctor scripts** — `wallet-new` (viem `generatePrivateKey`), `doctor` (balance via `eth_call balanceOf` on `0x8335…2913`, decode the three 402 quotes, check `CLOUDFLARE_API_TOKEN` with `/ai/run` unpaid). Commit.
 2. **`lib/x402.ts` + `lib/budget.ts`** — paid fetch factory, guarded signer, receipt decoder (use `atob`, not `Buffer`, to stay Workers-friendly). Unit tests (vitest) for budget math and receipt decoding. Commit.
 3. **Step 1 tool: `fetch_stocktwits_signals(symbol)`** — paid `GET /api/2/symbols/trending/{SYM}.json`, free `GET /api/2/streams/symbol/{SYM}.json`; derive `{ title, exchange, sector, trendingSummary, latestPrice, priceRange, bullish, bearish, neutral, sentimentChange, volumeChange, topMessages[] (3 short bodies, stripped of HTML) }`. Handle 402-after-payment (decode `error`), 403 geo, 429. Commit.
