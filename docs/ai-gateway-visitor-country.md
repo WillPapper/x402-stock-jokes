@@ -36,7 +36,16 @@ Extending the repro to Durable Objects shows the same identity propagating furth
 | 19:47 | US laptop | 14 consecutive paid `/ai/run` calls, all `200` | — |
 | 20:37–20:39 | Canada, work started from an alarm, no client requests during the run | all payments `200` from ORD | — |
 
-The same check can also fire later in the flow. When the unpaid request receives a `402` quote but the retry carrying `PAYMENT-SIGNATURE` is rejected at facilitator verification, the error is `503 {"error":"service_unavailable","message":"facilitator verify returned 403"}`. We saw this only in runs where a non-US client request was active by the time the retry was verified; it never occurred in US-only runs, and it stopped once no non-US client could reach the paying object. A `503` with no mention of country makes this hard to diagnose.
+### The second failure mode: `503 facilitator verify returned 403`
+
+An x402 payment is two HTTP requests from the client, and the country check runs on each of them, by different components:
+
+1. **Unpaid request.** The client sends the request without payment. The gateway checks the request's country here. Non-US: `403 disallowed visitor country`, no quote. US: `402` with a `PAYMENT-REQUIRED` quote.
+2. **Paid retry.** The client signs the quoted amount and repeats the request with a `PAYMENT-SIGNATURE` header. The gateway forwards the signed payment to the facilitator for verification. The facilitator applies the country check again, against the country of **this** request. If it refuses, the gateway returns `503 {"error":"service_unavailable","message":"facilitator verify returned 403"}`.
+
+So a payment can pass step 1 and fail step 2 when the country attributed to the request changes between the two. In our runs the two requests were 1 to 2 seconds apart, and the attributed country changed whenever a non-US client request became active in the Durable Object during that interval (step 7 of the reproduction). We recorded the `503` only in runs with a non-US client involved; in 14 consecutive US-only payments and in every run without a non-US client it never appeared.
+
+The practical problem: the `503` names the facilitator and says nothing about country, so from the client it is indistinguishable from an outage. It is the same eligibility decision as the `403` in step 1 and should carry the same error.
 
 ## Why this matters
 
