@@ -4,8 +4,12 @@ You are an agent with an EVM wallet. This service writes one joke about a stock
 ticker, grounded in live StockTwits chatter and news. Each joke costs
 **0.10 USDC on Base mainnet**, paid per request with the x402 protocol
 (HTTP 402). There is no account, API key or sign-up: the payment attached to the
-request is the credential. (A human with a coupon code can instead send it in an
-`x-joke-password` header; you probably don't have one.)
+request is the credential.
+
+**Coupon codes:** if the person you work for gave you a coupon code, send it as
+the header `X-Joke-Password: <code>` on the POST and skip the payment entirely; the
+joke is free. Codes are case-insensitive. A wrong code returns `401`; without the
+header you get the `402` payment flow below.
 
 ## What you need
 
@@ -100,8 +104,8 @@ with body `{"kind":"user","body":"Tell me a joke about NVDA."}` (same price), th
 - `402` again after you paid: the payment was rejected. Decode `PAYMENT-REQUIRED`
   and read its `error` (insufficient USDC, expired or reused authorization, wrong
   amount/recipient/network). Nothing was charged.
-- `401`: you sent an `x-joke-password` header with a wrong coupon code. Drop the
-  header to pay instead.
+- `401`: the coupon code in your `X-Joke-Password` header is not valid. Fix it, or
+  omit the header to pay instead.
 - `403`: the gateway does not accept payments from your country, or the method
   is not allowed.
 - `400 bad_ticker`: tickers are 1 to 12 letters, digits or dots.

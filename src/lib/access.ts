@@ -41,7 +41,7 @@ export async function checkAccess(request: Request, conversationId?: string): Pr
 	if (given !== null) {
 		// Case-insensitive: phones auto-capitalize the first letter, desktops don't.
 		if (expected && timingSafeEqual(given.trim().toLowerCase(), expected.trim().toLowerCase())) return done({ ok: true, by: 'password' });
-		return done({ ok: false, status: 401, reason: 'wrong coupon code; drop the X-Joke-Password header to pay 0.10 USDC with x402 instead' });
+		return done({ ok: false, status: 401, reason: 'Invalid coupon code. Send a valid code in the X-Joke-Password header for a free joke, or omit the header to pay 0.10 USDC with x402.' });
 	}
 
 	const token = request.headers.get(PAYMENT_CONTEXT_HEADER);
@@ -66,7 +66,7 @@ export async function checkAccess(request: Request, conversationId?: string): Pr
 export function paymentRequiredBody(conversationUrl: string) {
 	return {
 		error: 'payment_required',
-		message: `A joke costs ${PRICE_USDC} USDC on Base via x402. Or send a coupon code in the X-Joke-Password header for a free one.`,
+		message: `A joke costs ${PRICE_USDC} USDC on Base via x402 (pay the 402 and retry). If you have a coupon code, send it in the X-Joke-Password header instead and the joke is free.`,
 		pay: {
 			url: conversationUrl.replace(/^https?:\/\/[^/]+/, `https://${PUBLIC_HOST}`),
 			simplest: `POST https://${PUBLIC_HOST}/joke/<TICKER> then GET the returned poll URL`,

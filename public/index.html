@@ -60,7 +60,7 @@
   .linkbtn { background:none; border:0; padding:0; color:var(--accent); text-decoration:underline; cursor:pointer; font:inherit; font-size:inherit }
   details summary { cursor:pointer; margin-top:10px }
   .muted { color:var(--muted) }
-  .badge { cursor:pointer; border:1px solid transparent }
+  .badge { cursor:pointer; border:1px solid transparent; font-family:var(--mono); font-size:12px; padding:6px 8px; border-radius:999px; background:var(--chip); color:var(--fg) }
   .badge:hover, .badge.open { border-color:var(--accent) }
   .hood { margin-top:10px; border-top:1px dashed var(--line); padding-top:10px }
   .hood h4 { margin:0 0 4px; font-size:14px }
@@ -109,8 +109,8 @@
     <div class="actions"><button type="button" id="copy-pay">Copy instructions for my agent</button> <a class="linkbtn" href="/agent.md" target="_blank" rel="noopener">Open agent.md</a> <span class="step-detail" id="copied"></span></div>
     <details><summary class="step-detail">Minimal TypeScript</summary><pre id="paycurl"></pre></details>
     <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
-    <div class="step-title">Have a coupon code?</div>
-    <p class="step-detail" style="margin:4px 0 0">Enter it next to the ticker above and press "Tell me a joke" again; the joke is free.</p>
+    <div class="step-title">Have a coupon code? Then the joke is free</div>
+    <p class="step-detail" style="margin:4px 0 0">Here: enter it next to the ticker and press "Tell me a joke" again. For your agent: send it in an <code>X-Joke-Password</code> header on the POST instead of paying (the copied instructions explain this).</p>
     <p class="err hidden" id="pwerr" style="margin:8px 0 0"></p>
     <div id="cachedwrap" class="hidden">
       <p class="muted" style="margin:14px 0 4px">Meanwhile, the latest cached joke for <span id="cachedticker"></span>:</p>
@@ -151,7 +151,7 @@
   async function agentInstructions() {
     if (!agentMd) agentMd = await (await fetch('/agent.md')).text();
     const sym = (ticker.value.trim().toUpperCase() || 'NVDA');
-    return `Get me a joke about ${sym} from https://jokes.papper.me. It costs 0.10 USDC on Base via x402; pay it from my wallet, then poll for the joke and show me the joke, the "Based on" facts and the "Paid" receipts. Full instructions follow.\n\n` + agentMd.replace(/<TICKER>/g, sym).replace(/NVDA\./g, sym + '.');
+    return `Get me a joke about ${sym} from https://jokes.papper.me. It costs 0.10 USDC on Base via x402; pay it from my wallet, then poll for the joke and show me the joke, the "Based on" facts and the "Paid" receipts. (If I give you a coupon code, send it as an X-Joke-Password header instead of paying.) Full instructions follow.\n\n` + agentMd.replace(/<TICKER>/g, sym).replace(/NVDA\./g, sym + '.');
   }
   async function copyInstructions(statusEl) {
     const text = await agentInstructions();
@@ -285,7 +285,7 @@
       $('#cachedwrap').classList.remove('hidden');
     }
     $('#paywall').classList.remove('hidden');
-    setStep('started', 'error', pwError ? 'Not started: wrong coupon code.' : 'Not started: pay 0.10 USDC or use a coupon code.');
+    setStep('started', 'error', pwError ? 'Not started.' : 'Not started: pay 0.10 USDC or use a coupon code.');
     if (pwError) password.focus();
     else password.focus();
   }
@@ -302,7 +302,7 @@
         let body = {}; try { body = await res.json(); } catch {}
         if (res.status === 401) { savePassword(''); password.value = ''; }
         if (!body.cached) { try { body.cached = (await (await fetch(`/api/jokes/latest?ticker=${sym}`)).json()).joke; } catch {} }
-        showPaywall(body, sym, res.status === 401 ? (body.message || 'Wrong coupon code.') : null);
+        showPaywall(body, sym, res.status === 401 ? 'That coupon code is not valid. Check it and try again, or let your agent pay.' : null);
         go.disabled = false; return;
       }
       if (!res.ok) throw new Error(`POST ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -347,7 +347,7 @@
     const turns = pays.filter((p) => p.label.includes('orchestrator'));
     const find = (needle) => pays.find((p) => p.label.includes(needle));
     const st = find('StockTwits symbols'), ce = find('Ceramic'), jk = find('AI Gateway joke');
-    const chip = (key, name, p) => `<span class="chip badge" data-k="${key}" title="Click to see what ${name} returned">${name}${p && p.tx ? ` <a href="${p.tx}" target="_blank" rel="noopener">${money(p.authorizedUsdc)} ↗</a>` : p ? ` ≤ ${money(p.authorizedUsdc)}` : ''}</span>`;
+    const chip = (key, name, p) => `<button type="button" class="chip badge" data-k="${key}" title="See what ${name} returned">${name}${p && !p.tx ? ` ≤ ${money(p.authorizedUsdc)}` : ''} ▾</button>${p && p.tx ? `<a class="chip" href="${p.tx}" target="_blank" rel="noopener" title="USDC transfer on Basescan">${money(p.authorizedUsdc)} ↗</a>` : ''}`;
     const el = document.createElement('article');
     el.className = 'card' + (isNew ? ' new' : '');
     el.dataset.id = j.id;
