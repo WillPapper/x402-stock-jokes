@@ -65,6 +65,7 @@ export function paymentRequiredBody(conversationUrl: string) {
 			network: 'eip155:8453',
 			protocol: 'x402 v2, exact scheme, via Cloudflare Monetization Gateway',
 			howTo: 'Use an x402 client (e.g. @x402/fetch with @x402/evm) against the url above; it handles the 402, signs a USDC authorization, and retries. Then GET the same url to read the joke.',
+			instructions: `https://${PUBLIC_HOST}/agent.md`,
 		},
 	};
 }

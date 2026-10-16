@@ -54,6 +54,11 @@
   .feed .joke { font-size:17px }
   .receipts { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px }
   .pay { border-color:var(--warn) }
+  .howto { margin:8px 0 12px; padding-left:20px; font-size:15px }
+  .howto li { margin:4px 0 }
+  .actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap }
+  .linkbtn { background:none; border:0; padding:0; color:var(--accent); text-decoration:underline; cursor:pointer; font:inherit; font-size:inherit }
+  details summary { cursor:pointer; margin-top:10px }
   .muted { color:var(--muted) }
 </style>
 </head>
@@ -67,6 +72,10 @@
     <input id="password" type="password" placeholder="Password (or pay 0.10 USDC)" autocomplete="off">
     <button id="go" type="submit">Tell me a joke</button>
   </form>
+
+  <p class="step-detail" id="nopw" style="margin:-10px 0 18px">No password? Each joke costs 0.10 USDC on Base, paid by your agent with x402.
+    <button type="button" class="linkbtn" id="copy-top">Copy instructions for my agent</button>
+    <a href="/agent.md" target="_blank" rel="noopener">read them</a></p>
 
   <section class="card" id="run">
     <ol class="steps" id="steps">
@@ -84,9 +93,14 @@
   </section>
 
   <section class="card pay hidden" id="paywall">
-    <div class="step-title">Payment required</div>
-    <p class="step-detail" id="paytext"></p>
-    <pre id="paycurl"></pre>
+    <div class="step-title">Payment required: 0.10 USDC via x402, or the password</div>
+    <ol class="howto">
+      <li>Give your agent (Claude, an MCP tool, a script) a wallet with a little USDC on <b>Base mainnet</b>. No ETH needed.</li>
+      <li>Hand it the instructions below. They explain the 402 → sign → retry flow and how to read the joke back.</li>
+      <li>It POSTs to <code id="payurl"></code>, pays 0.10 USDC, and polls the same URL for the joke.</li>
+    </ol>
+    <div class="actions"><button type="button" id="copy-pay">Copy instructions for my agent</button> <a class="linkbtn" href="/agent.md" target="_blank" rel="noopener">Open agent.md</a> <span class="step-detail" id="copied"></span></div>
+    <details><summary class="step-detail">Minimal TypeScript</summary><pre id="paycurl"></pre></details>
     <div id="cachedwrap" class="hidden">
       <p class="muted" style="margin:14px 0 4px">Meanwhile, the latest cached joke for <span id="cachedticker"></span>:</p>
       <p class="joke" id="cachedjoke" style="font-size:18px"></p>
@@ -117,7 +131,25 @@
   let timer = null;
 
   try { password.value = localStorage.getItem('joke-password') || ''; } catch {}
-  password.addEventListener('change', () => { try { localStorage.setItem('joke-password', password.value); } catch {} });
+  const syncNoPw = () => { $('#nopw').classList.toggle('hidden', !!password.value); };
+  password.addEventListener('change', () => { try { localStorage.setItem('joke-password', password.value); } catch {} syncNoPw(); });
+  password.addEventListener('input', syncNoPw); syncNoPw();
+
+  // "Copy instructions for my agent": agent.md with the ticker filled in, plus a one-line brief on top.
+  let agentMd = null;
+  async function agentInstructions() {
+    if (!agentMd) agentMd = await (await fetch('/agent.md')).text();
+    const sym = (ticker.value.trim().toUpperCase() || 'NVDA');
+    return `Get me a joke about ${sym} from https://jokes.papper.me. It costs 0.10 USDC on Base via x402; pay it from my wallet, then poll for the joke and show me the joke, the "Based on" facts and the "Paid" receipts. Full instructions follow.\n\n` + agentMd.replace(/<TICKER>/g, sym).replace(/NVDA\./g, sym + '.');
+  }
+  async function copyInstructions(statusEl) {
+    const text = await agentInstructions();
+    try { await navigator.clipboard.writeText(text); if (statusEl) statusEl.textContent = 'Copied. Paste it to your agent.'; }
+    catch { window.open('/agent.md', '_blank'); if (statusEl) statusEl.textContent = 'Clipboard blocked; opened agent.md instead.'; }
+    if (statusEl) setTimeout(() => { statusEl.textContent = ''; }, 4000);
+  }
+  $('#copy-top').addEventListener('click', () => copyInstructions($('#nopw')));
+  $('#copy-pay').addEventListener('click', () => copyInstructions($('#copied')));
 
   fetch('/api/wallet').then((r) => r.json()).then((w) => {
     $('#wallet').innerHTML = `Paying from <a href="${w.basescan}" target="_blank" rel="noopener">${w.address.slice(0, 6)}…${w.address.slice(-4)}</a> on Base${w.usdc != null ? ` · ${Number(w.usdc).toFixed(3)} USDC left` : ''}${w.permit2Approved === false ? ' · <span class="err">Permit2 not approved</span>' : ''}`;
@@ -182,7 +214,7 @@
 
   function showPaywall(body, sym) {
     const url = (body.pay && body.pay.url) || `${PUBLIC}/agents/joke/<id>`;
-    $('#paytext').textContent = body.message || `Submitting a joke costs 0.10 USDC on Base via x402, or send the password.`;
+    $('#payurl').textContent = url;
     $('#paycurl').textContent = `# any x402 client works; with @x402/fetch:\nconst res = await fetchWithPayment("${url}", {\n  method: "POST", headers: { "content-type": "application/json" },\n  body: JSON.stringify({ kind: "user", body: "Tell me a joke about ${sym}." })\n});\n// then GET the same URL to read the joke`;
     const cached = body.cached;
     if (cached) {
