@@ -120,8 +120,8 @@
         }
         if (p.type === 'text' && m.role === 'assistant') {
           const lines = p.text.split('\n').map((l) => l.trim()).filter(Boolean);
-          const basedIdx = lines.findIndex((l) => /^based on:/i.test(l));
-          joke = (basedIdx > 0 ? lines.slice(0, basedIdx) : lines.filter((l) => !/^(paid|total):/i.test(l))).join('\n');
+          const basedIdx = lines.findIndex((l) => /^based( on)?\s*:/i.test(l));
+          joke = (basedIdx > 0 ? lines.slice(0, basedIdx) : lines.filter((l) => !/^(paid|total)\s*:/i.test(l))).join('\n');
           based = basedIdx >= 0 ? lines[basedIdx] : '';
         }
       }
