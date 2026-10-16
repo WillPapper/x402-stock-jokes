@@ -211,8 +211,8 @@
     return false;
   }
 
-  function showPaywall(body, sym, pwError) {
-    const url = (body.pay && body.pay.url) || `${PUBLIC}/agents/joke/<id>`;
+  function showPaywall(body, sym, pwError, convUrl) {
+    const url = (body.pay && body.pay.url) || convUrl || `${PUBLIC}/agents/joke/<id>`;
     $('#payurl').textContent = url; $('#paysym').textContent = sym;
     $('#pwerr').classList.toggle('hidden', !pwError); $('#pwerr').textContent = pwError || '';
     $('#paycurl').textContent = `# any x402 client works; with @x402/fetch:\nconst res = await fetchWithPayment("${url}", {\n  method: "POST", headers: { "content-type": "application/json" },\n  body: JSON.stringify({ kind: "user", body: "Tell me a joke about ${sym}." })\n});\n// then GET the same URL to read the joke`;
@@ -239,7 +239,7 @@
         let body = {}; try { body = await res.json(); } catch {}
         if (res.status === 401) savePassword('');
         if (!body.cached) { try { body.cached = (await (await fetch(`/api/jokes/latest?ticker=${sym}`)).json()).joke; } catch {} }
-        showPaywall(body, sym, res.status === 401 ? (body.message || 'Wrong password.') : null);
+        showPaywall(body, sym, res.status === 401 ? (body.message || 'Wrong password.') : null, PUBLIC + url);
         go.disabled = false; return;
       }
       if (!res.ok) throw new Error(`POST ${res.status}: ${(await res.text()).slice(0, 200)}`);
