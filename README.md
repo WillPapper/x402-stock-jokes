@@ -21,13 +21,13 @@ A real run (2026-10-16):
 
 ## Architecture
 
-Three views of the same system: what runs where, what happens during one joke, and where the USDC goes.
+Three views of the same system: what runs where, what happens during one joke, and where the USDC goes. One constraint shapes the first two: Cloudflare's gateways are US-only and judge the *visitor* whose request is in flight, so every paid call is made from a Durable Object that was started by an alarm, with no visitor attached, and nothing reads that object while it works (see [Where the agent runs](#where-the-agent-runs-and-why-it-matters)).
 
 ### Components
 
 ```mermaid
 flowchart TB
-  subgraph callers["Callers"]
+  subgraph callers["Callers, anywhere in the world"]
     direction LR
     browser["Browser<br/>public/index.html"]
     agentc["Another agent<br/>x402 client + wallet"]
@@ -35,11 +35,15 @@ flowchart TB
 
   subgraph cf["Cloudflare, jokes.papper.me"]
     mgw["Monetization Gateway<br/>seller rule: POST /joke/* or /agents/joke/*<br/>without X-Joke-Password answers 402<br/>0.10 USDC, exact, paid to the app wallet"]
-    subgraph worker["Worker: x402-stock-jokes"]
-      hono["Hono app, src/app.ts<br/>gate: coupon header or PAYMENT-CONTEXT JWT<br/>/joke/:ticker, /agents/joke/:id, /api/*"]
-      subgraph flue["Flue runtime"]
+    subgraph worker["Worker: x402-stock-jokes, src/app.ts (visitor's colo)"]
+      hono["Hono app<br/>gate: coupon header or PAYMENT-CONTEXT JWT<br/>POST /joke/:ticker, POST /agents/joke/:id<br/>GET /joke/:id, /api/*"]
+    end
+    runner["JokeRunner, src/cloudflare.ts<br/>Durable Object, us jurisdiction<br/>submit() queues, alarm() dispatches"]
+    subgraph flue["Flue runtime, placed next to the runner (US)"]
+      direction TB
+      do["Durable Object FlueJokeAgent<br/>agent Joke, src/agents/joke.ts<br/>one per conversation id"]
+      subgraph caps["what the agent composes"]
         direction LR
-        do["Durable Object FlueJokeAgent<br/>agent Joke, src/agents/joke.ts<br/>one per conversation id"]
         provider["pi-ai provider x402-ai-gateway<br/>every model turn becomes a paid /ai/run call"]
         tools["Tools, src/tools/<br/>fetch_stocktwits_signals<br/>search_stock_news<br/>write_joke"]
       end
@@ -50,10 +54,11 @@ flowchart TB
         ledger["Ledger<br/>receipts, Basescan links"]
       end
     end
-    d1[("D1: jokes, access")]
+    d1[("D1<br/>jokes, access, events")]
+    logs["Workers Logs<br/>one JSON line per event"]
   end
 
-  subgraph sellers["x402 sellers"]
+  subgraph sellers["x402 sellers (US-only)"]
     direction LR
     st["StockTwits<br/>Monetization Gateway preview<br/>exact, 0.001 USDC"]
     ceramic["Ceramic /search<br/>exact, 0.001 USDC"]
@@ -70,14 +75,19 @@ flowchart TB
   agentc -->|"POST, pays 0.10 USDC"| mgw
   mgw -->|"forwards with PAYMENT-CONTEXT JWT"| hono
   hono -->|"recordAccess(id, paidBy)"| d1
-  hono -->|"createAgentRouter(Joke)"| do
+  hono -->|"submit({id, body, by})<br/>answers 202 at once"| runner
+  runner -->|"alarm, 3 s later, no visitor attached:<br/>dispatch(Joke, message)"| do
   do -->|"useModel"| provider
   do -->|"useTool"| tools
-  do -->|"useAgentFinish: insertJoke"| d1
   provider --> paid
   tools --> paid
   budget --- paid
   paid -->|"onReceipt"| ledger
+  tools -->|"tool.start / tool.done / tool.error"| d1
+  paid -->|"x402.payment, ai.turn"| d1
+  d1 -.-|"same events"| logs
+  do -->|"useAgentFinish: insertJoke<br/>joke, facts, payments, steps, paidBy"| d1
+  d1 -->|"GET /joke/:id builds status<br/>from events + jokes, never from the agent"| hono
   paid -->|"exact"| st
   paid -->|"exact"| ceramic
   paid -->|"upto"| aigw
@@ -92,11 +102,12 @@ flowchart TB
 ```mermaid
 sequenceDiagram
   autonumber
-  participant B as Buyer (agent or browser)
+  participant B as Buyer (agent or browser, any country)
   participant G as Monetization Gateway
   participant W as Worker (Hono, src/app.ts)
   participant D as D1
-  participant A as FlueJokeAgent (Durable Object)
+  participant R as JokeRunner (DO, us jurisdiction)
+  participant A as FlueJokeAgent (DO, US)
   participant AI as AI Gateway /ai/run
   participant ST as StockTwits
   participant CE as Ceramic
@@ -109,29 +120,37 @@ sequenceDiagram
   G->>W: forward + PAYMENT-CONTEXT JWT
   Note over W: checkAccess: coupon header, or verify the JWT<br/>against payments.cloudflare.com/certs
   W->>D: recordAccess(id, paidBy)
-  W->>A: POST /agents/joke/<id> {kind: user, body: "Tell me a joke about NVDA."}
-  W-->>B: 202 { id, poll }
+  W->>R: submit({ id, body, by })
+  Note over R: storage.put(pending:id), setAlarm(now + 3 s)
+  R-->>W: queued
+  W-->>B: 202 { id, poll: /joke/<id> }
 
-  Note over A: useAgentStart: ledger.mark()
+  Note over R: alarm fires: no originating request,<br/>so no visitor identity on anything below
+  R->>A: dispatch(Joke, { id, message })
+  Note over A: useAgentStart: ledger.mark(), log agent colo (gate event)
   A->>AI: turn 1 (qwen3.8-27b), Payment-Method: x402
   AI-->>A: 402, upto quote (ceiling about 0.13 USDC)
   Note over A: Budget.reserve, sign Permit2 witness
   A->>AI: retry with PAYMENT-SIGNATURE
   AI->>X: settle real token cost (fractions of a cent)
   AI-->>A: tool call: fetch_stocktwits_signals
+  A->>D: events: x402.payment, ai.turn
 
+  A->>D: event: tool.start fetch_stocktwits_signals
   A->>ST: step 1: GET symbols/show/NVDA
   ST-->>A: 402, exact quote 0.001 USDC
   A->>ST: retry with EIP-3009 authorization
   ST->>X: facilitator settles 0.001 USDC
   ST-->>A: symbol + PAYMENT-RESPONSE receipt (tx hash)
   A->>ST: GET streams/symbol/NVDA (free)
+  A->>D: event: tool.done (full output + receipts)
 
   A->>AI: turn 2 (paid as above)
   AI-->>A: tool call: search_stock_news
   A->>CE: step 2: POST /search, pays 0.001 USDC exact
   CE->>X: facilitator settles
   CE-->>A: headlines + receipt
+  A->>D: events: tool.start, x402.payment, tool.done
 
   A->>AI: turn 3 (paid as above)
   AI-->>A: tool call: write_joke(facts)
@@ -139,15 +158,19 @@ sequenceDiagram
   AI->>X: settle real token cost
   AI-->>A: the joke
   Note over A: handoff.setDraft(id, joke, facts)
+  A->>D: events: tool.start, x402.payment, tool.done
 
   A->>AI: turn 4 (paid as above)
   AI-->>A: final reply: joke, Based on, Paid
   Note over A: useResponseFinish: attach ledger.since(mark)<br/>as metadata.payments
-  A->>D: useAgentFinish: insertJoke(ticker, joke, facts, payments, paidBy)
+  A->>D: useAgentFinish: insertJoke(ticker, joke, facts, payments, steps, paidBy)<br/>+ event agent.done
 
-  B->>W: GET poll URL (free, every few seconds)
-  W->>A: GET /agents/joke/<id> snapshot
-  W-->>B: { done: true, joke, basedOn, steps, payments }
+  loop every few seconds, free, from anywhere
+    B->>W: GET /joke/<id>
+    W->>D: events for id + jokes row
+    W-->>B: { done, outcome, steps, payments, joke, basedOn }
+  end
+  Note over W,A: the agent's object is never read while it runs:<br/>a read would lend the reader's country to the next payment
 ```
 
 ### Flow of funds
@@ -173,7 +196,7 @@ flowchart LR
   alchemy -.-> page
 ```
 
-**Reading the diagrams.** The buyer's 0.10 USDC lands in the same wallet the agent spends from, so sales top up costs. Every outgoing payment passes one signer, wrapped so the `Budget` is consulted before any signature exists: a payment over the per-call cap, or over the isolate total (`MAX_USDC_PER_ISOLATE`), is refused with no money moved. `exact` payments return a `PAYMENT-RESPONSE` receipt with the transaction hash; `upto` payments do not, so the page matches AI Gateway settlements to a joke by time window from the wallet's on-chain history.
+**Reading the diagrams.** The buyer's 0.10 USDC lands in the same wallet the agent spends from, so sales top up costs. Every outgoing payment passes one signer, wrapped so the `Budget` is consulted before any signature exists: a payment over the per-call cap, or over the isolate total (`MAX_USDC_PER_ISOLATE`), is refused with no money moved. `exact` payments return a `PAYMENT-RESPONSE` receipt with the transaction hash; `upto` payments do not, so the page matches AI Gateway settlements to a joke by time window from the wallet's on-chain history. The runner and the agent are two Durable Objects: the runner only queues and fires an alarm, the agent does all the paying, and the Worker that serves `GET /joke/<id>` reads the `events` and `jokes` tables rather than the agent, so a poll from outside the US cannot attach itself to a payment in flight.
 
 ## How the money moves
 
