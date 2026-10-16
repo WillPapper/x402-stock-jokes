@@ -28,7 +28,17 @@ A real run (2026-10-16):
 
 The Flue agent's own model turns pay too: `src/lib/ai-gateway-provider.ts` is a pi-ai provider whose fetch rewrites each chat-completions call into the AI Gateway `/ai/run` envelope with `Payment-Method: x402`, pays the 402, and replays the completed result as a stream.
 
-Spend caps live in `wrangler.jsonc` (`MAX_USDC_PER_DATA_CALL`, `MAX_USDC_PER_INFERENCE`, `MAX_USDC_PER_ISOLATE`) and are enforced *before* anything is signed (`src/lib/budget.ts`). Every payment is recorded with its Basescan receipt and attached to the reply.
+Spend caps and model choices are plain-text vars in `wrangler.jsonc`, enforced *before* anything is signed (`src/lib/budget.ts`). Every payment is recorded with its Basescan receipt and attached to the reply.
+
+| Var (`wrangler.jsonc` → `vars`) | Default | Meaning |
+|---|---|---|
+| `ORCHESTRATOR_MODEL` | `alibaba/qwen3.8-27b` | the agent's own model; must be one of the four AI Gateway machine-payment models |
+| `JOKE_MODEL` | `google/gemma-4-26b-a4b-it` | the model `write_joke` pays for |
+| `MAX_USDC_PER_DATA_CALL` | `0.01` | cap per StockTwits or Ceramic payment (they quote 0.001) |
+| `MAX_USDC_PER_INFERENCE` | `0.25` | cap per AI Gateway authorization ceiling (Qwen quotes about 0.13) |
+| `MAX_USDC_PER_ISOLATE` | `5` | total one Worker isolate may authorize before it refuses |
+
+They apply in `bun run dev` and in production; `.dev.vars` can override them locally (see `.dev.vars.example`). The four secrets never go in `wrangler.jsonc`.
 
 ## Setup
 
