@@ -9,7 +9,7 @@ A Flue agent on Cloudflare Workers that, given a ticker, produces a joke about t
 ```
 user: "tell me a joke about NVDA"           (HTML page or curl)
   │
-  │  Flue agent StockJoker — its own model turns run on AI Gateway /ai/run, paid with x402
+  │  Flue agent StockJoke — its own model turns run on AI Gateway /ai/run, paid with x402
   │
   ├─ Step 1  StockTwits (x402, Cloudflare Monetization Gateway)  → symbol details + "why it's trending"
   ├─ Step 2  Ceramic search (x402, Cloudflare Monetization Gateway) → recent news headlines
@@ -49,14 +49,14 @@ Verified live today unless marked otherwise.
 - HTTP: `createAgentRouter(Agent)` → `POST /agents/<name>/:id` (202), `GET` same URL for a snapshot or `?view=updates&offset=...&live=sse` for a live stream.
 
 ### Toolchain
-Node 26.2, **Bun** (chosen), no global wrangler (use `bunx`). Repo contains README, LICENSE, .gitignore, PLAN.md.
+Node 26.2, **Bun** (chosen), no global wrangler (use `bunx`). The scaffold commit used npm and left a `package-lock.json`; step 1 swaps it for `bun.lock`.
 
 ## 3. Architecture
 
 ```
 src/
   app.ts                     Hono app: setProvider(x402AiGatewayProvider), mount /agents/joker, GET /api/health, GET /api/wallet
-  agents/joker.ts            'use agent' — StockJoker: useModel('x402-ai-gateway/openai/gpt-oss-20b'), useTool x3,
+  agents/joker.ts            'use agent' — StockJoke: useModel('x402-ai-gateway/openai/gpt-oss-20b'), useTool x3,
                              usePersistentState spend ledger, useResponseFinish receipts, ordered instructions
   tools/stocktwits.ts        fetch_stocktwits_signals  (durable; 2 paid calls: trending + show)
   tools/ceramic.ts           search_stock_news         (durable; 1 paid call)
@@ -87,7 +87,7 @@ Design decisions:
 Commit after each step; push at the end of each step.
 
 0. **Spike (needs account id + token in `.dev.vars`).** A Bun script that, with a funded wallet: (a) sends a paid `/ai/run` request to `openai/gpt-oss-20b` and records the response envelope; (b) repeats with `input.tools` to confirm tool calling; (c) tries `stream: true`; (d) tries `/ai/v1/chat/completions` with `Payment-Method: x402`. Outcome decides the provider shim: if (d) pays, the provider's `baseUrl` is `.../ai/v1` and no translation is needed; otherwise the paid fetch rewrites chat-completions requests into the `/ai/run` envelope and, if `/ai/run` does not stream, converts the completed result into a one-chunk SSE stream for the adapter. Record findings in PLAN.md section 2.
-1. **Scaffold.** `bunx @flue/cli init` into a scratch dir (repo is non-empty), move files in, merge `.gitignore` (`.dev.vars`, `.flue-vite.wrangler.jsonc`, `dist/`). `bun add @x402/core @x402/evm @x402/fetch viem valibot @earendil-works/pi-ai`. Rename hello agent → `StockJoker`, fix the `wrangler.jsonc` migration class (`FlueStockJokerAgent`).
+1. **Scaffold — done (commit d8d4252).** Flue skeleton merged, agent `StockJoke` at `src/agents/joker.ts`, mounted at `/agents/joker`, x402 packages installed. Remaining: switch the lockfile to Bun (`rm package-lock.json && bun install`), add `@earendil-works/pi-ai` as a direct dependency for the provider shim, and replace the keyless `cloudflare/...` model with the x402 provider in step 4.
 2. **Wallet + doctor scripts.**
 3. **`lib/x402.ts`, `lib/budget.ts`, `lib/ledger.ts`** with `bun test` coverage for budget math and receipt decoding. Use `atob`, not `Buffer`.
 4. **`lib/ai-gateway-provider.ts`** per the spike; register in `app.ts`; smoke-test one agent turn locally under `vite dev` and confirm a receipt.
