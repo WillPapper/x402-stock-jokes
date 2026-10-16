@@ -60,7 +60,8 @@ export interface ReceiptEvent extends PaidResult {
 }
 
 export interface PaidFetchOptions {
-	privateKey: `0x${string}`;
+	/** The wallet key, or a getter resolved on first use (so secrets are read lazily). */
+	privateKey: `0x${string}` | (() => `0x${string}`);
 	budget: Budget;
 	/** Dollar cap handed to the x402 client as a second line of defence, e.g. "$0.10". */
 	maxUsdPerPayment: string;
@@ -112,12 +113,15 @@ export function walletFromKey(privateKey: `0x${string}`): PrivateKeyAccount {
  * (cheap: no network work happens at construction).
  */
 export function createPaidFetch(options: PaidFetchOptions) {
-	const account = walletFromKey(options.privateKey);
+	let cached: PrivateKeyAccount | null = null;
+	const account = () => (cached ??= walletFromKey(typeof options.privateKey === 'function' ? options.privateKey() : options.privateKey));
 	const { budget } = options;
 	let pending: bigint | null = null;
 
 	const guardedSigner = {
-		address: account.address,
+		get address() {
+			return account().address;
+		},
 		async signTypedData(args: Parameters<PrivateKeyAccount['signTypedData']>[0]) {
 			const amount = amountFromTypedData(args.message as Record<string, unknown> | undefined);
 			if (amount === null) {
@@ -125,18 +129,25 @@ export function createPaidFetch(options: PaidFetchOptions) {
 			}
 			budget.reserve(amount);
 			pending = amount;
-			return account.signTypedData(args);
+			return account().signTypedData(args);
 		},
 	};
 
-	const client = x402Client.fromConfig({
-		schemes: [
-			{ network: BASE_MAINNET, client: new ExactEvmScheme(guardedSigner as never) },
-			{ network: BASE_MAINNET, client: new UptoEvmScheme(guardedSigner as never) },
-		],
-		spendControls: { maxAmountPerPayment: options.maxUsdPerPayment },
-	});
-	const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+	// The scheme clients read the signer's address at construction, so build the
+	// x402 client on first use: secrets are read when a request is made, not at
+	// module load (Workers validate modules before secrets exist).
+	let paying: ((input: string, init?: RequestInit) => Promise<Response>) | null = null;
+	const fetchWithPayment = () => {
+		if (paying) return paying;
+		const client = x402Client.fromConfig({
+			schemes: [
+				{ network: BASE_MAINNET, client: new ExactEvmScheme(guardedSigner as never) },
+				{ network: BASE_MAINNET, client: new UptoEvmScheme(guardedSigner as never) },
+			],
+			spendControls: { maxAmountPerPayment: options.maxUsdPerPayment },
+		});
+		return (paying = wrapFetchWithPayment(fetch, client) as unknown as typeof paying);
+	};
 
 	let last: PaidResult = { authorized: null, receipt: null, settled: false };
 
@@ -145,7 +156,7 @@ export function createPaidFetch(options: PaidFetchOptions) {
 		const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 		let res: Response;
 		try {
-			res = await fetchWithPayment(input as string, init);
+			res = await fetchWithPayment()!(input as string, init);
 		} catch (err) {
 			if (pending !== null) budget.release(pending);
 			last = { authorized: pending, receipt: null, settled: false };
@@ -163,8 +174,9 @@ export function createPaidFetch(options: PaidFetchOptions) {
 		return res;
 	}
 
+	// A method, not a getter: Object.assign would invoke a getter at module load.
 	return Object.assign(paidFetch, {
-		address: account.address,
+		walletAddress: () => account().address,
 		last: () => last,
 		describeLast: () =>
 			last.authorized === null

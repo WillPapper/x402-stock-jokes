@@ -86,7 +86,7 @@
   let timer = null;
 
   fetch('/api/wallet').then((r) => r.json()).then((w) => {
-    $('#wallet').innerHTML = `Paying from <a href="${w.basescan}" target="_blank" rel="noopener">${w.address.slice(0, 6)}…${w.address.slice(-4)}</a> on Base · ${Number(w.usdc).toFixed(3)} USDC left${w.permit2Approved ? '' : ' · <span class="err">Permit2 not approved</span>'}`;
+    $('#wallet').innerHTML = `Paying from <a href="${w.basescan}" target="_blank" rel="noopener">${w.address.slice(0, 6)}…${w.address.slice(-4)}</a> on Base${w.usdc != null ? ` · ${Number(w.usdc).toFixed(3)} USDC left` : ''}${w.permit2Approved === false ? ' · <span class="err">Permit2 not approved</span>' : ''}`;
   }).catch(() => { $('#wallet').textContent = 'Wallet status unavailable.'; });
 
   function setStep(name, state, detail) {

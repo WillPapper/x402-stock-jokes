@@ -91,8 +91,9 @@ export function normalizeMessagesForWorkersAi(messages: unknown): unknown {
 }
 
 export interface X402AiGatewayOptions {
-	accountId: string;
-	apiToken: string;
+	/** Account id and token, or getters resolved per request (secrets stay lazy). */
+	accountId: string | (() => string);
+	apiToken: string | (() => string);
 	/** Fetch that pays x402 challenges with the `upto` scheme. */
 	paidFetch: PaidFetch;
 	/** Model ids to expose, e.g. 'openai/gpt-oss-20b'. */
@@ -105,9 +106,11 @@ export interface X402AiGatewayOptions {
  * Build the translating fetch. Exported for tests; `createX402AiGatewayProvider`
  * wires it into pi-ai.
  */
+const resolve = (v: string | (() => string)) => (typeof v === 'function' ? v() : v);
+
 export function createAiRunFetch(options: X402AiGatewayOptions): typeof fetch {
-	const aiRunUrl = `https://api.cloudflare.com/client/v4/accounts/${options.accountId}/ai/run`;
 	return async (input, init) => {
+		const aiRunUrl = `https://api.cloudflare.com/client/v4/accounts/${resolve(options.accountId)}/ai/run`;
 		const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 		if (!url.endsWith('/chat/completions')) {
 			return options.paidFetch(input as string, init);
@@ -121,7 +124,7 @@ export function createAiRunFetch(options: X402AiGatewayOptions): typeof fetch {
 		if (!('max_tokens' in rest) && !('max_completion_tokens' in rest)) rest.max_tokens = 2048;
 		const res = await options.paidFetch(aiRunUrl, {
 			method: 'POST',
-			headers: { authorization: `Bearer ${options.apiToken}`, 'payment-method': 'x402', 'content-type': 'application/json' },
+			headers: { authorization: `Bearer ${resolve(options.apiToken)}`, 'payment-method': 'x402', 'content-type': 'application/json' },
 			body: JSON.stringify({ model, input: rest }),
 			signal: init?.signal ?? undefined,
 		});
@@ -159,7 +162,8 @@ export function createX402AiGatewayProvider(options: X402AiGatewayOptions) {
 			name: `${id} (x402 via AI Gateway)`,
 			api: 'openai-completions',
 			provider: X402_PROVIDER_ID,
-			baseUrl: `https://api.cloudflare.com/client/v4/accounts/${options.accountId}/ai/v1`,
+			// Placeholder: createAiRunFetch rewrites every request to /ai/run.
+			baseUrl: 'https://api.cloudflare.com/client/v4/accounts/_/ai/v1',
 			reasoning: false,
 			input: ['text'],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -175,7 +179,7 @@ export function createX402AiGatewayProvider(options: X402AiGatewayOptions) {
 		auth: {
 			apiKey: {
 				name: 'Cloudflare API token',
-				resolve: async () => ({ auth: { apiKey: options.apiToken } }),
+				resolve: async () => ({ auth: { apiKey: resolve(options.apiToken) } }),
 			},
 		},
 		models,

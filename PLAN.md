@@ -1,6 +1,6 @@
 # x402 Stock Jokes — Implementation Plan
 
-Status: **built and verified locally, 2026-10-16.** Steps 0–10 done; step 11 (deploy) in progress. Section 8 records what changed during implementation.
+Status: **built, deployed and verified in production, 2026-10-16** at https://x402-stock-jokes.papper.workers.dev. All steps done. Section 8 records what changed during implementation.
 
 ## 1. Goal
 
@@ -139,3 +139,4 @@ Expected cost per joke: 0.002 (StockTwits) + 0.001 (Ceramic) + 3–4 orchestrato
 - **Models (per review on 2026-10-16):** orchestrator `alibaba/qwen3.8-27b`, joke `google/gemma-4-26b-a4b-it`. Thinking models burn the whole budget reasoning unless `chat_template_kwargs: { enable_thinking: false }` is sent (works for Gemma and Qwen; `thinking`/`reasoning_effort` flags are ignored). Qwen's ceiling is ≈ 0.13 USDC per turn, so `MAX_USDC_PER_INFERENCE` is 0.25.
 - **Agent guardrails:** the agent may only output a joke returned by `write_joke`; tool retries are capped by instruction; an earlier run retried a failing joke call seven times before the facilitator refused.
 - **Bun** replaced the npm lockfile; the Workers AI binding was removed so `vite dev` runs without a wrangler login.
+- **Deploy:** Workers validate the module at upload time before secrets exist, so every secret read (wallet key, account id, token, even the x402 client construction) is lazy. `cf deploy` cannot handle the Flue/Vite output; `wrangler deploy` + `wrangler secret bulk` are used. Public Base RPCs rate-limit the edge, so `/api/wallet` tries several and degrades to address-only.

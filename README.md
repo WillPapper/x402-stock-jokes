@@ -78,11 +78,13 @@ Conversations are durable: reuse the same id to keep talking.
 ## Deploy
 
 ```sh
-for s in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN EVM_BASE_ADDRESS EVM_BASE_PRIVATE_KEY; do
-  grep "^$s=" .dev.vars | cut -d= -f2- | bunx wrangler secret put $s
-done
-bun run deploy    # vite build && wrangler deploy
+bunx wrangler login
+bun run deploy                      # vite build && wrangler deploy
+# then upload the four secrets (a JSON object of name → value; keep the file out of git):
+bunx wrangler secret bulk secrets.json --name x402-stock-jokes
 ```
+
+`cf deploy` does not understand Flue's Vite build output yet, so deploy goes through wrangler. Live instance: https://x402-stock-jokes.papper.workers.dev
 
 ## What's inside
 

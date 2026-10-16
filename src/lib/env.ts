@@ -15,6 +15,7 @@ interface Bindings {
 	JOKE_MODEL?: string;
 }
 
+// `env` from cloudflare:workers is live, so reads happen at call time, never at module load.
 const e = env as unknown as Bindings;
 
 function need(name: keyof Bindings): string {
@@ -54,15 +55,19 @@ export const config = {
 	},
 };
 
-/** Caps shared by every data call this isolate makes (StockTwits, Ceramic). */
-export const dataBudget = new Budget(usdToBaseUnits(config.maxUsdPerDataCall), usdToBaseUnits(config.maxUsdPerIsolate));
-/** Caps shared by every inference authorization this isolate makes (AI Gateway). */
-export const inferenceBudget = new Budget(usdToBaseUnits(config.maxUsdPerInference), usdToBaseUnits(config.maxUsdPerIsolate));
+let budgets: { data: Budget; inference: Budget } | null = null;
+/** Caps shared by every payment this isolate makes; created on first use. */
+export function getBudgets() {
+	return (budgets ??= {
+		data: new Budget(usdToBaseUnits(config.maxUsdPerDataCall), usdToBaseUnits(config.maxUsdPerIsolate)),
+		inference: new Budget(usdToBaseUnits(config.maxUsdPerInference), usdToBaseUnits(config.maxUsdPerIsolate)),
+	});
+}
 
 export function paidDataFetch(label: string) {
 	return createPaidFetch({
-		privateKey: config.privateKey,
-		budget: dataBudget,
+		privateKey: () => config.privateKey,
+		budget: getBudgets().data,
 		maxUsdPerPayment: `$${config.maxUsdPerDataCall}`,
 		onReceipt: (ev) => ledger.record(label, ev),
 	});
@@ -70,8 +75,8 @@ export function paidDataFetch(label: string) {
 
 export function paidInferenceFetch(label: string) {
 	return createPaidFetch({
-		privateKey: config.privateKey,
-		budget: inferenceBudget,
+		privateKey: () => config.privateKey,
+		budget: getBudgets().inference,
 		maxUsdPerPayment: `$${config.maxUsdPerInference}`,
 		onReceipt: (ev) => ledger.record(label, ev),
 	});
