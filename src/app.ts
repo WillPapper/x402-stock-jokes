@@ -36,13 +36,13 @@ const app = new Hono();
 app.post('/agents/joke/:id/abort', (c) => c.json({ error: 'not_public', message: 'abort is internal' }, 403));
 app.use('/agents/joke/:id/:rest{.+}', async (c, next) => {
 	const st = await statusFromDb(c.req.param('id'));
-	return st.done ? next() : c.json({ ...st, note: 'This conversation is still being made; the full conversation is served here once done.' });
+	return st.done ? next() : c.json({ ...st, note: 'The joke is still generating. The full conversation will be served here once complete.' });
 });
 app.use('/agents/joke/:id', async (c, next) => {
 	const id = c.req.param('id');
 	if (c.req.method !== 'POST') {
 		const st = await statusFromDb(id);
-		return st.done ? next() : c.json({ ...st, note: 'This conversation is still being made; the full conversation is served here once done.' });
+		return st.done ? next() : c.json({ ...st, note: 'The joke is still generating. The full conversation will be served here once complete.' });
 	}
 	const access = await checkAccess(c.req.raw, id);
 	if (!access.ok) {
