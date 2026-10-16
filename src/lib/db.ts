@@ -71,12 +71,18 @@ export async function insertJoke(row: Omit<JokeRow, 'id' | 'createdAt'> & { id?:
 	return full;
 }
 
-/** Newest first. With `after`, only rows created after that ISO timestamp (oldest first, for appending). */
-export async function listJokes(opts: { after?: string; limit?: number } = {}): Promise<JokeRow[]> {
+/**
+ * Newest first. With `after`, only rows created after that ISO timestamp (oldest
+ * first, for appending); with `before`, only rows created before it (newest
+ * first, for paging back through the feed).
+ */
+export async function listJokes(opts: { after?: string; before?: string; limit?: number } = {}): Promise<JokeRow[]> {
 	const limit = Math.min(Math.max(opts.limit ?? 30, 1), 200);
 	const stmt = opts.after
 		? db().prepare('SELECT * FROM jokes WHERE created_at > ?1 ORDER BY created_at ASC LIMIT ?2').bind(opts.after, limit)
-		: db().prepare('SELECT * FROM jokes ORDER BY created_at DESC LIMIT ?1').bind(limit);
+		: opts.before
+			? db().prepare('SELECT * FROM jokes WHERE created_at < ?1 ORDER BY created_at DESC LIMIT ?2').bind(opts.before, limit)
+			: db().prepare('SELECT * FROM jokes ORDER BY created_at DESC LIMIT ?1').bind(limit);
 	const { results } = await stmt.all<RawRow>();
 	return results.map(parse);
 }

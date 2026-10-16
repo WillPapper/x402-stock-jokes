@@ -5,70 +5,146 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stock Jokes</title>
 <meta name="description" content="A Flue agent that pays StockTwits, Ceramic and Cloudflare AI Gateway per request with USDC on Base (x402) to write one joke about a stock.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d6b5e'/%3E%3Ctext x='32' y='44' font-family='system-ui,sans-serif' font-size='36' font-weight='700' text-anchor='middle' fill='%23fff'%3E%24%3C/text%3E%3C/svg%3E">
 <style>
-  :root { --bg:#f6f4ee; --fg:#1d1c1a; --muted:#6b675f; --card:#ffffff; --line:#e4e0d6; --accent:#0d6b5e; --accent-fg:#ffffff; --ok:#1a7f4b; --warn:#a15c00; --err:#b3261e; --chip:#eef4f2; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; --chip:#242a28; } }
-  :root[data-theme="dark"] { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; --chip:#242a28; }
+  :root { --bg:#f6f4ee; --fg:#1d1c1a; --muted:#6b675f; --card:#ffffff; --line:#e4e0d6; --accent:#0d6b5e; --accent-hover:#0a5a4f; --accent-fg:#ffffff; --ok:#1a7f4b; --warn:#a15c00; --err:#b3261e; --chip:#eef4f2; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-hover:#7ee0cf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; --chip:#242a28; } }
+  :root[data-theme="dark"] { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-hover:#7ee0cf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; --chip:#242a28; }
   * { box-sizing:border-box }
   body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
   main { max-width:760px; margin:0 auto; padding:36px 16px 64px; }
   h1 { font-size:28px; margin:0 0 4px; letter-spacing:-0.01em }
-  h2 { font-size:17px; margin:28px 0 10px }
+  h2 { font-size:17px; margin:28px 0 10px; display:flex; align-items:baseline; gap:10px }
+  h2 small { font-weight:400; color:var(--muted); font-size:13px }
   .sub { color:var(--muted); margin:0 0 22px }
-  form { display:grid; grid-template-columns:1.2fr 1fr auto; gap:8px; margin-bottom:20px }
+  a { color:var(--accent); text-underline-offset:2px }
+  .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap }
+
+  /* ---- form ---- */
+  form { display:grid; grid-template-columns:1.2fr 1fr auto; gap:8px 8px; margin-bottom:20px; align-items:start }
   @media (max-width:560px) { form { grid-template-columns:1fr } }
-  input { font:inherit; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); min-width:0 }
+  input { font:inherit; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); min-width:0; width:100% }
+  input:focus-visible { outline:2px solid var(--accent); outline-offset:1px }
   input#ticker { text-transform:uppercase }
-  button { font:inherit; font-weight:600; padding:12px 18px; border:0; border-radius:10px; background:var(--accent); color:var(--accent-fg); cursor:pointer }
+  input.invalid { border-color:var(--err); outline-color:var(--err) }
+  .field { position:relative; min-width:0 }
+  .field input { padding-right:64px }
+  input.masked { -webkit-text-security:disc }
+  .reveal { position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:0; padding:6px 8px; color:var(--muted); font:13px/1 inherit; font-family:inherit; cursor:pointer; border-radius:6px }
+  .reveal:hover { color:var(--fg); background:var(--chip) }
+  .hint { grid-column:2; margin:0; color:var(--muted); font-size:13px; line-height:1.4 }
+  .hint.err { color:var(--err) }
+  @media (max-width:560px) { .hint { grid-column:1 } }
+  button { font:inherit; font-weight:600; padding:12px 18px; border:0; border-radius:10px; background:var(--accent); color:var(--accent-fg); cursor:pointer; transition:background .12s, transform .06s }
+  button:hover:not(:disabled) { background:var(--accent-hover) }
+  button:active:not(:disabled) { transform:translateY(1px) }
   button:disabled { opacity:.55; cursor:default }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin-bottom:14px; min-width:0 }
+  button:focus-visible, .badge:focus-visible, .linkbtn:focus-visible { outline:2px solid var(--accent); outline-offset:2px }
+  .secondary { background:var(--chip); color:var(--fg); font-weight:500 }
+  .secondary:hover:not(:disabled) { background:var(--line) }
+
+  /* ---- cards ---- */
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin-bottom:14px; min-width:0; position:relative }
+  .card.new { animation:pop .6s ease-out }
+  @keyframes pop { from { transform:translateY(-6px); box-shadow:0 0 0 3px var(--accent) } to { transform:none } }
+  .hidden { display:none !important }
+  .muted { color:var(--muted) }
+
+  /* ---- run card ---- */
+  .bar { position:absolute; left:14px; right:14px; top:0; height:3px; border-radius:0 0 3px 3px; overflow:hidden; background:var(--line) }
+  .bar::after { content:""; position:absolute; left:-40%; width:40%; height:100%; background:var(--accent); animation:slide 1.4s ease-in-out infinite }
+  @keyframes slide { to { left:100% } }
+  @media (prefers-reduced-motion: reduce) { .bar::after, .dot.running { animation:none } }
+  .run-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:14px }
+  .run-summary .linkbtn { font-size:14px }
+  #run.collapsed .steps { display:none }
+  #run:not(.done) .run-summary { display:none }
+  #run.done:not(.collapsed) .run-summary { margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed var(--line) }
   .steps { list-style:none; padding:0; margin:0; display:grid; gap:12px }
   .steps li { display:grid; grid-template-columns:26px 1fr auto; gap:10px; align-items:start }
-  .dot { width:22px; height:22px; border-radius:50%; border:2px solid var(--line); display:grid; place-items:center; font-size:12px; margin-top:2px }
+  .dot { width:22px; height:22px; border-radius:50%; border:2px solid var(--line); display:grid; place-items:center; font-size:12px; margin-top:2px; color:var(--muted) }
   .dot.running { border-color:var(--warn); animation:pulse 1s infinite }
   .dot.done { border-color:var(--ok); background:var(--ok); color:#fff }
   .dot.error { border-color:var(--err); background:var(--err); color:#fff }
+  .dot.info { border-color:var(--accent); color:var(--accent); font-weight:700 }
   @keyframes pulse { 50% { opacity:.4 } }
   .step-title { font-weight:600 }
+  .steptitle { background:none; border:0; padding:0; margin:0; font:inherit; font-weight:600; color:inherit; cursor:pointer; text-align:left; border-radius:4px }
+  .steptitle.clickable::after { content:" ▾"; color:var(--muted); font-size:12px }
+  .steptitle[aria-expanded="true"].clickable::after { content:" ▴" }
   .step-detail { color:var(--muted); font-size:14px; word-break:break-word }
-  .chip { display:inline-block; font:12px/1 var(--mono); padding:6px 8px; border-radius:999px; background:var(--chip); color:var(--fg); white-space:nowrap; margin-top:4px }
+  .receipt { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end }
+  .steps .hood { grid-column:1 / -1 }
+
+  /* ---- chips ---- */
+  .chip { display:inline-flex; align-items:center; min-height:30px; font:13px/1 var(--mono); padding:0 10px; border-radius:999px; background:var(--chip); color:var(--fg); white-space:nowrap; gap:6px }
   .chip a { color:var(--accent); text-decoration:none }
+  .chip a:hover { text-decoration:underline }
+  .chip.x402 { background:var(--accent); color:var(--accent-fg); font-weight:600 }
+  .chipgroup { display:inline-flex; align-items:stretch; border-radius:999px; background:var(--chip); overflow:hidden; min-height:30px }
+  .chipgroup .badge { border-radius:0; min-height:30px; padding:0 10px }
+  .chipgroup a, .chipgroup .amt { display:inline-flex; align-items:center; padding:0 10px 0 8px; border-left:1px solid var(--card); color:var(--accent); font:13px/1 var(--mono); text-decoration:none; white-space:nowrap }
+  .chipgroup .amt { color:var(--muted) }
+  .chipgroup a:hover { background:var(--line) }
+  .chipgroup .badge:hover, .chipgroup .badge[aria-expanded="true"] { background:var(--line); border-color:transparent }
+  .badge { cursor:pointer; border:1px solid transparent; font:13px/1 var(--mono); min-height:30px; padding:0 10px; border-radius:999px; background:var(--chip); color:var(--fg); font-weight:500; white-space:nowrap }
+  .badge::after { content:" ▾"; color:var(--muted) }
+  .badge[aria-expanded="true"]::after { content:" ▴" }
+  .badge:hover { border-color:var(--accent); background:var(--chip) }
+  .badge[aria-expanded="true"] { border-color:var(--accent) }
+  .receipts { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; align-items:center }
+
+  /* ---- result ---- */
   .joke { font-size:22px; line-height:1.35; margin:0 0 12px; white-space:pre-wrap }
   .based { color:var(--muted); font-size:15px; margin:0 }
+  .paid { color:var(--muted); font-size:14px; margin:8px 0 0 }
   .err { color:var(--err); white-space:pre-wrap }
-  .hidden { display:none }
-  footer { color:var(--muted); font-size:13px; margin-top:24px }
-  code, pre { font-family:var(--mono); font-size:13px }
-  pre { background:var(--chip); padding:12px; border-radius:10px; overflow:auto; margin:10px 0 0 }
-  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px }
-  .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px }
-  .stat b { display:block; font-size:22px }
-  .stat span { color:var(--muted); font-size:13px }
-  .spark { width:100%; height:48px; display:block; margin-top:6px }
-  .feed { display:grid; gap:10px }
-  .feed .card { margin:0; animation:none; min-width:0; overflow:hidden }
-  .feed .card.new { animation:pop .6s ease-out }
-  @keyframes pop { from { transform:translateY(-6px); box-shadow:0 0 0 3px var(--accent) } to { transform:none } }
-  .meta { display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:13px; margin-bottom:6px }
+  .meta { display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:13px; margin-bottom:6px; flex-wrap:wrap }
   .ticker { font-weight:700; color:var(--fg) }
-  .feed .joke { font-size:17px }
-  .receipts { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px }
+  .result-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:14px; font-size:14px }
+
+  /* ---- paywall ---- */
   .pay { border-color:var(--warn) }
+  .pay .step-title { font-size:17px }
   .howto { margin:8px 0 12px; padding-left:20px; font-size:15px }
   .howto li { margin:4px 0 }
   .actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap }
-  .linkbtn { background:none; border:0; padding:0; color:var(--accent); text-decoration:underline; cursor:pointer; font:inherit; font-size:inherit }
+  .linkbtn { background:none; border:0; padding:0; color:var(--accent); text-decoration:underline; text-underline-offset:2px; cursor:pointer; font:inherit; font-size:inherit; font-weight:500 }
+  .linkbtn:hover { color:var(--accent-hover) }
   details summary { cursor:pointer; margin-top:10px }
-  .muted { color:var(--muted) }
-  .badge { cursor:pointer; border:1px solid transparent; font-family:var(--mono); font-size:12px; padding:6px 8px; border-radius:999px; background:var(--chip); color:var(--fg) }
-  .badge:hover, .badge.open { border-color:var(--accent) }
-  .hood { margin-top:10px; border-top:1px dashed var(--line); padding-top:10px }
-  .hood h4 { margin:0 0 4px; font-size:14px }
+  code, pre { font-family:var(--mono); font-size:13px }
+  pre { background:var(--chip); padding:12px; border-radius:10px; overflow:auto; margin:10px 0 0; white-space:pre-wrap; word-break:break-word }
+
+  /* ---- under the hood ---- */
+  .hood { margin-top:10px; border-top:1px dashed var(--line); padding-top:10px; position:relative }
+  .hood h4 { margin:0 28px 4px 0; font-size:14px }
   .hood p { margin:0 0 8px; font-size:14px; color:var(--muted) }
-  .hood pre { max-height:340px; overflow:auto; margin:0; font-size:12px; white-space:pre-wrap; word-break:break-word }
+  .hood .close { position:absolute; right:0; top:8px; background:none; border:0; color:var(--muted); font-size:18px; line-height:1; padding:4px 8px; cursor:pointer; border-radius:6px }
+  .hood .close:hover { color:var(--fg); background:var(--chip) }
+  .hood dl { display:grid; grid-template-columns:max-content 1fr; gap:4px 12px; margin:0 0 8px; font-size:14px }
+  .hood dt { color:var(--muted) } .hood dd { margin:0; word-break:break-word }
+  .hood ul { margin:0 0 8px; padding-left:18px; font-size:14px }
+  .hood li { margin:2px 0 }
+  .hood blockquote { margin:0 0 8px; padding:8px 12px; border-left:3px solid var(--accent); background:var(--chip); border-radius:0 8px 8px 0; font-size:14px; white-space:pre-wrap }
+  .hood details summary { font-size:13px; color:var(--muted); margin-top:4px }
+  .hood pre { max-height:340px; overflow:auto; margin:6px 0 0; font-size:12px }
   .hood .links { font-size:13px; margin-top:8px }
-  .steps li.clickable { cursor:pointer }
-  .steps .hood { grid-column:1 / -1 }
+
+  /* ---- stats + feed ---- */
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px }
+  @media (max-width:560px) { .stats { grid-template-columns:1fr 1fr } .stats .stat.wide { grid-column:1 / -1; order:3 } }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; min-width:0 }
+  .stat b { display:block; font-size:22px }
+  .stat span { color:var(--muted); font-size:13px; display:block }
+  .stat small { color:var(--muted); font-size:12px; display:block; margin-top:4px; font-family:var(--mono); word-break:break-word }
+  .sparkwrap { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap }
+  .spark { width:100%; height:48px; display:block; margin-top:6px }
+  .axis { display:flex; justify-content:space-between; color:var(--muted); font-size:11px; font-family:var(--mono); margin-top:2px }
+  .feed { display:grid; gap:10px }
+  .feed .card { margin:0; min-width:0; overflow:hidden }
+  .feed .joke { font-size:17px }
+  .more { display:flex; justify-content:center; margin-top:12px }
+  footer { color:var(--muted); font-size:13px; margin-top:24px }
 </style>
 </head>
 <body>
@@ -77,56 +153,70 @@
   <p class="sub">One joke per ticker. Every step is an x402 micro-payment in USDC on Base: StockTwits for the chatter, Ceramic for the news, Cloudflare AI Gateway for the punchline and for the agent's own turns.</p>
 
   <form id="form">
-    <input id="ticker" placeholder="Ticker, e.g. NVDA" maxlength="12" autocomplete="off" required>
-    <input id="password" type="text" placeholder="Coupon code (optional)" autocomplete="off" autocapitalize="none" spellcheck="false">
+    <input id="ticker" placeholder="Ticker, e.g. NVDA" maxlength="12" autocomplete="off" required aria-label="Ticker">
+    <div class="field">
+      <input id="password" type="text" class="masked" placeholder="Coupon code (optional)" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Coupon code" aria-describedby="pwhint">
+      <button type="button" class="reveal" id="reveal" aria-label="Show coupon code" aria-pressed="false">Show</button>
+    </div>
     <button id="go" type="submit">Tell me a joke</button>
+    <p class="hint" id="pwhint" aria-live="polite">Optional. Without one, your agent pays 0.10 USDC via x402.</p>
   </form>
-  <p class="step-detail" style="margin:-10px 0 18px">The coupon code is optional. Without one you'll get instructions for your agent to pay 0.10 USDC with x402 instead.</p>
 
-  <section class="card" id="run">
-    <ol class="steps" id="steps">
-      <li><span class="dot" data-step="started"></span><div><div class="step-title">Agent started</div><div class="step-detail">Waiting for a ticker.</div></div><div class="receipt"></div></li>
-      <li><span class="dot" data-step="fetch_stocktwits_signals"></span><div><div class="step-title">1. StockTwits chatter (x402)</div><div class="step-detail"></div></div><div class="receipt"></div></li>
-      <li><span class="dot" data-step="search_stock_news"></span><div><div class="step-title">2. Ceramic news search (x402)</div><div class="step-detail"></div></div><div class="receipt"></div></li>
-      <li><span class="dot" data-step="write_joke"></span><div><div class="step-title">3. Joke from AI Gateway (x402)</div><div class="step-detail"></div></div><div class="receipt"></div></li>
-      <li><span class="dot" data-step="finished"></span><div><div class="step-title">Agent finished</div><div class="step-detail">Each model turn is its own x402 payment to AI Gateway.</div></div><div class="receipt"></div></li>
-    </ol>
-  </section>
-
-  <section class="card hidden" id="result">
+  <section class="card hidden" id="result" aria-live="polite">
+    <div class="meta"><span><span class="ticker" id="r-ticker"></span><span id="r-title"></span></span><span id="r-when"></span></div>
     <p class="joke" id="joke"></p>
     <p class="based" id="based"></p>
+    <p class="paid hidden" id="paid"></p>
     <p class="err hidden" id="error"></p>
+    <div class="result-actions"><button type="button" class="secondary" id="another">Tell me another</button><a id="permalink" href="#" target="_blank" rel="noopener">Permalink (JSON)</a></div>
   </section>
 
   <section class="card pay hidden" id="paywall">
-    <div class="step-title">A joke about <span id="paysym"></span> costs 0.10 USDC, paid by your agent with x402</div>
+    <div class="step-title">A joke about <span id="paysym"></span> costs 0.10 USDC</div>
+    <p class="step-detail" style="margin:2px 0 0">Paid by your agent with x402, no account or API key needed.</p>
     <ol class="howto">
       <li>Your agent needs a wallet with a little USDC on <b>Base mainnet</b> (no ETH needed).</li>
       <li>Copy the instructions and paste them to your agent. They explain the 402 → sign → retry flow and how to read the joke back.</li>
       <li>It POSTs to <code id="payurl"></code>, pays 0.10 USDC, polls the returned URL, and shows you the joke, the facts and the receipts.</li>
     </ol>
-    <div class="actions"><button type="button" id="copy-pay">Copy instructions for my agent</button> <a class="linkbtn" href="/agent.md" target="_blank" rel="noopener">Open agent.md</a> <span class="step-detail" id="copied"></span></div>
+    <div class="actions"><button type="button" id="copy-pay">Copy instructions for my agent</button> <a class="linkbtn" href="/agent.md" target="_blank" rel="noopener">Open agent.md</a> <span class="step-detail" id="copied" aria-live="polite"></span></div>
     <details><summary class="step-detail">Minimal TypeScript</summary><pre id="paycurl"></pre></details>
     <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
-    <div class="step-title">Have a coupon code? Then the joke is free</div>
+    <div class="step-title" style="font-size:15px">Have a coupon code? Then the joke is free</div>
     <p class="step-detail" style="margin:4px 0 0">Here: enter it next to the ticker and press "Tell me a joke" again. For your agent: send it in an <code>X-Joke-Password</code> header on the POST instead of paying (the copied instructions explain this).</p>
-    <p class="err hidden" id="pwerr" style="margin:8px 0 0"></p>
     <div id="cachedwrap" class="hidden">
-      <p class="muted" style="margin:14px 0 4px">Meanwhile, the latest cached joke for <span id="cachedticker"></span>:</p>
+      <p class="muted" style="margin:14px 0 4px">Meanwhile, the latest joke for <span id="cachedticker"></span> <span id="cachedwhen"></span>:</p>
       <p class="joke" id="cachedjoke" style="font-size:18px"></p>
       <div class="receipts" id="cachedreceipts"></div>
     </div>
   </section>
 
-  <h2>Live feed</h2>
+  <div id="live" class="sr-only" aria-live="polite"></div>
+  <section class="card hidden" id="run">
+    <div class="bar hidden" id="bar" aria-hidden="true"></div>
+    <div class="run-summary"><span id="summary-text"></span><button type="button" class="linkbtn" id="summary-toggle" aria-expanded="false" aria-controls="steps">Show details</button></div>
+    <ol class="steps" id="steps">
+      <li><span class="dot" data-step="started"></span><div><div class="step-title">Agent started</div><div class="step-detail">Waiting for a ticker.</div></div><div class="receipt"></div></li>
+      <li><span class="dot" data-step="fetch_stocktwits_signals"></span><div><button type="button" class="steptitle" aria-expanded="false">1. StockTwits chatter (x402)</button><div class="step-detail"></div></div><div class="receipt"></div></li>
+      <li><span class="dot" data-step="search_stock_news"></span><div><button type="button" class="steptitle" aria-expanded="false">2. Ceramic news search (x402)</button><div class="step-detail"></div></div><div class="receipt"></div></li>
+      <li><span class="dot" data-step="write_joke"></span><div><button type="button" class="steptitle" aria-expanded="false">3. Joke from AI Gateway (x402)</button><div class="step-detail"></div></div><div class="receipt"></div></li>
+      <li><span class="dot" data-step="finished"></span><div><button type="button" class="steptitle" aria-expanded="false">Agent turns</button><div class="step-detail">Each model turn is its own x402 payment to AI Gateway.</div></div><div class="receipt"></div></li>
+    </ol>
+  </section>
+
+  <h2>Live feed <small id="feedcount"></small></h2>
   <div class="stats">
-    <div class="stat"><b id="s-count">–</b><span>jokes so far</span></div>
-    <div class="stat"><b id="s-paid">–</b><span>USDC paid on-chain <span id="s-paid-detail" class="muted"></span></span></div>
-    <div class="stat"><b id="s-earned">–</b><span>USDC earned from x402 jokes</span></div>
+    <div class="stat"><b id="s-count">–</b><span>jokes so far</span><small id="s-count-detail"></small></div>
+    <div class="stat wide"><b id="s-paid">–</b><span>USDC paid on-chain</span><small id="s-paid-detail"></small></div>
+    <div class="stat"><b id="s-earned">–</b><span>USDC earned from x402 jokes</span><small id="s-earned-detail"></small></div>
   </div>
-  <div class="card"><div class="step-detail">Jokes per hour, last 24h</div><svg class="spark" id="spark" viewBox="0 0 240 48" preserveAspectRatio="none" aria-label="jokes per hour"></svg></div>
+  <div class="card">
+    <div class="sparkwrap"><div class="step-detail">Jokes per hour, last 24h</div><div class="step-detail" id="sparkpeak"></div></div>
+    <svg class="spark" id="spark" viewBox="0 0 240 48" preserveAspectRatio="none" aria-label="jokes per hour" role="img"></svg>
+    <div class="axis"><span>24h ago</span><span>now</span></div>
+  </div>
   <div class="feed" id="feed"><p class="muted" id="feedempty">No jokes yet.</p></div>
+  <div class="more hidden" id="morewrap"><button type="button" class="secondary" id="more">Show older jokes</button></div>
 
   <footer id="wallet">Loading wallet…</footer>
 </main>
@@ -134,17 +224,41 @@
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
-  const form = $('#form'), ticker = $('#ticker'), password = $('#password'), go = $('#go');
+  const form = $('#form'), ticker = $('#ticker'), password = $('#password'), go = $('#go'), pwhint = $('#pwhint');
+  const PW_HINT = 'Optional. Without one, your agent pays 0.10 USDC via x402.';
   const savedPassword = () => { try { return localStorage.getItem('joke-password') || ''; } catch { return ''; } };
   try { password.value = savedPassword(); } catch {}
   const savePassword = (v) => { try { if (v) localStorage.setItem('joke-password', v); else localStorage.removeItem('joke-password'); } catch {} };
   const dots = Object.fromEntries([...document.querySelectorAll('.dot')].map((d) => [d.dataset.step, d]));
-  const money = (x) => Number(x || 0).toFixed(4);
+  const money = (x, digits = 4) => Number(x || 0).toFixed(digits);
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const PUBLIC = 'https://jokes.papper.me';
-  let WALLET = '';
-  let timer = null;
+  const SELLER_ORDER = ['AI Gateway', 'StockTwits', 'Ceramic'];
+  let timer = null, clock = null;
 
+  // Coupon reveal toggle: the code is a password in all but name, so it is masked by default.
+  $('#reveal').addEventListener('click', () => {
+    const show = password.classList.contains('masked');
+    password.classList.toggle('masked', !show);
+    $('#reveal').textContent = show ? 'Hide' : 'Show';
+    $('#reveal').setAttribute('aria-pressed', String(show));
+    $('#reveal').setAttribute('aria-label', show ? 'Hide coupon code' : 'Show coupon code');
+  });
+  const setPwHint = (text, isError) => { pwhint.textContent = text; pwhint.classList.toggle('err', !!isError); password.classList.toggle('invalid', !!isError); };
+  password.addEventListener('input', () => { if (pwhint.classList.contains('err')) setPwHint(PW_HINT, false); });
+
+  // ---- time helpers ----
+  const relTime = (iso) => {
+    const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+    if (s < 45) return 'just now';
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+    return `${Math.round(s / 86400)} d ago`;
+  };
+  const timeEl = (iso) => `<time datetime="${esc(iso)}" title="${esc(new Date(iso).toLocaleString())}" data-ts="${esc(iso)}">${relTime(iso)}</time>`;
+  const tickTimes = () => document.querySelectorAll('time[data-ts]').forEach((t) => { t.textContent = relTime(t.dataset.ts); });
+  const mmss = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  const cleanFact = (f) => String(f ?? '').trim().replace(/[.;]+$/, '');
 
   // "Copy instructions for my agent": agent.md with the ticker filled in, plus a one-line brief on top.
   let agentMd = null;
@@ -162,57 +276,141 @@
   $('#copy-pay').addEventListener('click', () => copyInstructions($('#copied')));
 
   fetch('/api/wallet').then((r) => r.json()).then((w) => {
-    WALLET = w.address;
     $('#wallet').innerHTML = `Paying from <a href="${w.basescan}" target="_blank" rel="noopener">${w.address.slice(0, 6)}…${w.address.slice(-4)}</a> on Base${w.usdc != null ? ` · ${Number(w.usdc).toFixed(3)} USDC left` : ''}${w.permit2Approved === false ? ' · <span class="err">Permit2 not approved</span>' : ''}`;
   }).catch(() => { $('#wallet').textContent = 'Wallet status unavailable.'; });
 
-  // ---- under the hood ----
+  // ---- under the hood: a human summary first, the raw JSON behind a disclosure ----
   const HOOD = {
-    stocktwits: { title: 'Step 1 · StockTwits', what: 'GET /api/2/symbols/show/<TICKER>.json through Cloudflare\'s Monetization Gateway (0.001 USDC, x402 exact scheme, settled on Base), plus the free symbol stream for recent posts. This is the parsed response the agent received:' },
-    ceramic: { title: 'Step 2 · Ceramic search', what: 'POST https://api.ceramic.ai/search through the Monetization Gateway (0.001 USDC, x402 exact). Top results the agent received:' },
-    joke: { title: 'Step 3 · AI Gateway', what: 'POST /ai/run on Cloudflare AI Gateway with Payment-Method: x402 (upto scheme: a ceiling is authorized, the real token cost is settled). The facts the agent passed in, and the model\'s answer:' },
-    turns: { title: 'Agent turns · AI Gateway', what: 'The orchestrator model itself runs through AI Gateway machine payments: every turn is an x402 authorization. Payments made during this joke:' },
+    stocktwits: { title: 'Step 1 · StockTwits', what: 'GET /api/2/symbols/show/<TICKER>.json through Cloudflare\'s Monetization Gateway (0.001 USDC, x402 exact scheme, settled on Base), plus the free symbol stream for recent posts.' },
+    ceramic: { title: 'Step 2 · Ceramic search', what: 'POST https://api.ceramic.ai/search through the Monetization Gateway (0.001 USDC, x402 exact).' },
+    joke: { title: 'Step 3 · AI Gateway', what: 'POST /ai/run on Cloudflare AI Gateway with Payment-Method: x402 (upto scheme: a ceiling is authorized, the real token cost is settled).' },
+    turns: { title: 'Agent turns · AI Gateway', what: 'The orchestrator model itself runs through AI Gateway machine payments: every turn is an x402 authorization.' },
   };
+  const dl = (rows) => `<dl>${rows.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
+  function hoodSummary(key, data) {
+    if (!data || data.note) return `<p>${esc(data?.note || 'No data for this step.')}</p>`;
+    if (key === 'stocktwits') {
+      const d = data;
+      const samples = (d.sampleMessages || []).slice(0, 3);
+      return dl([
+        ['Symbol', esc([d.title, d.symbol, d.exchange].filter(Boolean).join(' · '))],
+        ['Price', d.latestPrice ? esc(`$${d.latestPrice}${d.priceLow && d.priceHigh ? ` (range $${d.priceLow} – $${d.priceHigh})` : ''}`) : null],
+        ['Sentiment', d.messagesSampled != null ? esc(`${d.bullish} bullish · ${d.bearish} bearish · ${d.neutral} neutral of ${d.messagesSampled} posts`) : null],
+        ['Change', d.sentimentChange != null ? esc(`sentiment ${d.sentimentChange > 0 ? '+' : ''}${d.sentimentChange} · volume ${d.volumeChange > 0 ? '+' : ''}${d.volumeChange}`) : null],
+        ['Watchlist', d.watchlistCount != null ? esc(Number(d.watchlistCount).toLocaleString() + ' people') : null],
+      ]) + (samples.length ? `<p>Sample posts:</p><ul>${samples.map((m) => `<li>${esc(typeof m === 'string' ? m : m.body || JSON.stringify(m))}</li>`).join('')}</ul>` : '');
+    }
+    if (key === 'ceramic') {
+      const rs = data.results || [];
+      return (data.query ? dl([['Query', esc(data.query)]]) : '') + (rs.length ? `<ul>${rs.map((r) => `<li>${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}${r.description ? ` <span class="muted">· ${esc(r.description.slice(0, 140))}${r.description.length > 140 ? '…' : ''}</span>` : ''}</li>`).join('')}</ul>` : '<p>No results.</p>');
+    }
+    if (key === 'joke') {
+      const facts = data.facts || data.input?.facts || [];
+      const u = data.usage;
+      return dl([
+        ['Model', esc(data.model || '')],
+        ['Tokens', u ? esc(`${u.prompt_tokens ?? u.input_tokens ?? '?'} in · ${u.completion_tokens ?? u.output_tokens ?? '?'} out`) : null],
+      ]) + (facts.length ? `<p>Facts passed in:</p><ul>${facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : '') + (data.joke ? `<p>The model's answer:</p><blockquote>${esc(data.joke)}</blockquote>` : '');
+    }
+    if (key === 'turns') {
+      const ts = Array.isArray(data) ? data : [];
+      const ceiling = ts[0]?.authorizedUsdc;
+      return dl([
+        ['Turns', esc(String(ts.length))],
+        ['Ceiling', ceiling ? esc(`≤ ${money(ceiling)} USDC authorized per turn; the real token cost (a fraction of a cent) is what settles`) : null],
+        ['Scheme', ts[0]?.scheme ? esc(ts[0].scheme) : null],
+      ]) + (ts.length ? `<ul>${ts.map((t, i) => `<li>Turn ${i + 1} · ${esc(new Date(t.at).toLocaleTimeString())}${t.ok === false ? ' · <span class="err">failed</span>' : ''}</li>`).join('')}</ul>` : '');
+    }
+    return '';
+  }
   function hoodPanel(key, data, extra) {
     const h = HOOD[key] || { title: key, what: '' };
     const el = document.createElement('div');
     el.className = 'hood';
-    el.innerHTML = `<h4>${esc(h.title)}</h4><p>${esc(h.what)}</p><pre>${esc(JSON.stringify(data, null, 2) || 'no data')}</pre>${extra ? `<div class="links">${extra}</div>` : ''}`;
+    el.innerHTML = `<button type="button" class="close" aria-label="Close">×</button><h4>${esc(h.title)}</h4><p>${esc(h.what)}</p>${hoodSummary(key, data)}<details><summary>Raw response</summary><pre>${esc(JSON.stringify(data, null, 2) || 'no data')}</pre></details>${extra ? `<div class="links">${extra}</div>` : ''}`;
     return el;
   }
-  function toggleHood(container, key, data, extra, badge) {
+  function closeHood(container) {
+    container.querySelectorAll('.hood').forEach((h) => h.remove());
+    container.querySelectorAll('[aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+  }
+  function toggleHood(container, key, data, extra, badge, mount) {
     const existing = container.querySelector('.hood');
     const wasOpen = existing && existing.dataset.k === key;
-    if (existing) existing.remove();
-    container.querySelectorAll('.badge.open').forEach((b) => b.classList.remove('open'));
+    closeHood(container);
     if (wasOpen) return;
     const panel = hoodPanel(key, data, extra); panel.dataset.k = key;
-    container.appendChild(panel);
-    if (badge) badge.classList.add('open');
+    panel.querySelector('.close').addEventListener('click', (e) => { e.stopPropagation(); closeHood(container); if (badge) badge.focus(); });
+    (mount || container).appendChild(panel);
+    if (badge) badge.setAttribute('aria-expanded', 'true');
+  }
+
+  // ---- receipts: one chip per seller (name opens the panel, amount links to Basescan) ----
+  function receiptChip(p, label) {
+    if (!p) return '';
+    const amt = money(p.authorizedUsdc) + ' USDC';
+    if (p.tx) return `<span class="chip">${label ? esc(label) + ' ' : ''}<a href="${p.tx}" target="_blank" rel="noopener" title="USDC transfer on Basescan">${amt} ↗</a></span>`;
+    return `<span class="chip" title="upto scheme: ceiling authorized, actual cost settled by AI Gateway">${label ? esc(label) + ' ' : ''}≤ ${amt}</span>`;
+  }
+  function receiptsRow(j) {
+    const pays = j.payments || [];
+    const turns = pays.filter((p) => p.label.includes('orchestrator'));
+    const find = (needle) => pays.find((p) => p.label.includes(needle));
+    const st = find('StockTwits symbols'), ce = find('Ceramic'), jk = find('AI Gateway joke');
+    const group = (key, name, p) => `<span class="chipgroup"><button type="button" class="badge" data-k="${key}" aria-expanded="false" title="See what ${esc(name)} returned">${esc(name)}</button>${p ? (p.tx ? `<a href="${p.tx}" target="_blank" rel="noopener" title="USDC transfer on Basescan">${money(p.authorizedUsdc)} ↗</a>` : `<span class="amt" title="upto scheme: ceiling authorized, actual cost settled by AI Gateway">≤ ${money(p.authorizedUsdc)}</span>`) : ''}</span>`;
+    return `${j.paidBy === 'x402' ? '<span class="chip x402" title="The buyer paid 0.10 USDC through the Monetization Gateway">paid via x402</span>' : ''}${group('stocktwits', 'StockTwits', st)}${group('ceramic', 'Ceramic', ce)}${group('joke', 'AI Gateway joke', jk)}${group('turns', `${turns.length} agent turn${turns.length === 1 ? '' : 's'}`, null)}${j.paid ? `<span class="chip" title="Settled USDC transfers for this joke: StockTwits + Ceramic ${j.paid.exactUsdc.toFixed(4)}, AI Gateway ${j.paid.aiUsdc.toFixed(4)}"><b>paid ${j.paid.totalUsdc.toFixed(4)} USDC</b> on-chain</span>` : ''}`;
+  }
+  function wireBadges(el, j) {
+    const pays = j.payments || [];
+    const turns = pays.filter((p) => p.label.includes('orchestrator'));
+    const find = (needle) => pays.find((p) => p.label.includes(needle));
+    const steps = j.steps || {};
+    el.querySelectorAll('.badge').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = b.dataset.k;
+      const fallback = { note: 'The full response for this step was not archived (jokes made before 2026-10-16 20:10 UTC only kept their payments and facts).', facts: j.facts || [], payment: key === 'stocktwits' ? find('StockTwits symbols') : key === 'ceramic' ? find('Ceramic') : find('AI Gateway joke') };
+      const data = key === 'turns' ? (turns.length ? turns : { note: 'No per-turn records for this joke.' }) : (steps[key] || fallback);
+      const links = j.conversationId ? `<a href="/joke/${encodeURIComponent(j.conversationId)}" target="_blank" rel="noopener">run status JSON</a> · <a href="/api/events?conversation=${encodeURIComponent(j.conversationId)}" target="_blank" rel="noopener">x402 gateway events</a>` : '';
+      toggleHood(el, key, data, links, b);
+    }));
   }
 
   // ---- current run ----
-  function receiptChip(p) {
-    if (!p) return '';
-    const amt = money(p.authorizedUsdc) + ' USDC';
-    return p.tx ? `<span class="chip"><a href="${p.tx}" target="_blank" rel="noopener">${amt} ↗</a></span>` : `<span class="chip" title="upto scheme: ceiling authorized, actual cost settled by AI Gateway">≤ ${amt}</span>`;
-  }
   function setStep(name, state, detail, receiptHtml) {
     const dot = dots[name]; if (!dot) return;
+    const prev = dot.dataset.state || '';
+    dot.dataset.state = state;
+    if (state !== prev && (state === 'done' || state === 'error')) $('#live').textContent = `${dot.parentElement.querySelector('.step-title, .steptitle').textContent}: ${state === 'done' ? 'done' : 'failed'}${detail ? '. ' + detail : ''}`;
     dot.className = 'dot ' + state;
-    dot.textContent = state === 'done' ? '✓' : state === 'error' ? '!' : '';
+    const word = { done: 'done', error: 'failed', running: 'in progress', info: 'not started' }[state] || 'pending';
+    dot.innerHTML = (state === 'done' ? '✓' : state === 'error' ? '!' : state === 'info' ? '$' : '') + `<span class="sr-only"> ${word}</span>`;
     if (detail !== undefined) dot.parentElement.querySelector('.step-detail').textContent = detail;
     if (receiptHtml !== undefined) dot.parentElement.querySelector('.receipt').innerHTML = receiptHtml;
   }
+  const show = (id, on) => $('#' + id).classList.toggle('hidden', !on);
+  let runOutputs = {}, runPayments = [], runId = null, runStarted = 0, runSym = '';
   function reset() {
-    runOutputs = {}; runPayments = []; document.querySelectorAll('#steps .hood').forEach((h) => h.remove()); document.querySelectorAll('#steps .badge.open').forEach((b) => b.classList.remove('open'));
+    runOutputs = {}; runPayments = [];
+    document.querySelectorAll('#steps .hood').forEach((h) => h.remove());
+    document.querySelectorAll('#steps .steptitle').forEach((b) => b.setAttribute('aria-expanded', 'false'));
     for (const k of Object.keys(dots)) setStep(k, '', '', '');
     setStep('started', 'running', 'Sending your request…');
     setStep('finished', '', 'Each model turn is its own x402 payment to AI Gateway.', '');
-    for (const id of ['result', 'paywall', 'error', 'cachedwrap']) $('#' + id).classList.add('hidden');
-    $('#joke').textContent = ''; $('#based').textContent = '';
+    $('#run').classList.remove('collapsed', 'done'); $('#summary-toggle').setAttribute('aria-expanded', 'false'); $('#summary-toggle').textContent = 'Show details';
+    for (const id of ['result', 'paywall', 'error', 'cachedwrap', 'paid']) show(id, false);
+    $('#joke').textContent = ''; $('#based').textContent = ''; $('#paid').textContent = '';
+    show('run', true); show('bar', true);
+    setPwHint(PW_HINT, false);
   }
-  let runOutputs = {}; let runPayments = []; let runId = null;
+  function workingLine(turns) {
+    const elapsed = runStarted ? mmss(Date.now() - runStarted) : '0:00';
+    return `Working… ${elapsed} · usually 1–2 min${turns ? ` · ${turns} paid model turn${turns === 1 ? '' : 's'} so far` : ''}`;
+  }
+  const turnsChip = (turns, settled) => {
+    if (!turns.length) return '';
+    const ceiling = turns[0].authorizedUsdc;
+    return `<span class="chip" title="upto scheme: this ceiling is authorized per turn; the real token cost is settled">${turns.length} turn${turns.length === 1 ? '' : 's'} · ≤ ${money(ceiling, 2)} USDC each</span>${settled != null ? `<span class="chip" title="Settled on-chain for all AI Gateway calls during this joke (joke + turns)"><b>${money(settled)} USDC</b> settled</span>` : ''}`;
+  };
   // Status comes from /joke/<id>, built from D1 events, never from the agent's
   // Durable Object (reads there would lend the reader's location to the payments).
   function render(st) {
@@ -238,85 +436,121 @@
       const next = order.find((n) => states[n] !== 'done');
       for (const n of order) {
         if (states[n] && states[n] !== 'pending') continue;
-        if (n === next) setStep(n, 'running', 'Next: waiting for the agent to call this step…', '');
+        if (n === next) setStep(n, 'running', `The agent is reading the data and deciding its next step${turns.length ? ` (model turn ${turns.length})` : ''}…`, '');
         else setStep(n, '', 'Not started.', '');
       }
-      setStep('finished', 'running', turns.length ? `Working… ${turns.length} paid model turn${turns.length === 1 ? '' : 's'} so far` : 'Working…', turns.map(receiptChip).join(' '));
+      setStep('finished', 'running', workingLine(turns.length), turnsChip(turns));
       return false;
     }
     for (const n of order) if (!states[n] || states[n] === 'pending') setStep(n, 'error', 'Skipped.', '');
     const failed = st.outcome !== 'completed' ? (st.error || st.outcome) : null;
-    if (st.joke) { $('#joke').textContent = st.joke; $('#based').textContent = st.basedOn ? 'Based on: ' + st.basedOn : ''; $('#result').classList.remove('hidden'); }
-    setStep('finished', failed ? 'error' : 'done', failed ? 'Failed' : `${turns.length} paid model turns`, turns.map(receiptChip).join(' '));
-    if (failed) { $('#error').textContent = failed; $('#error').classList.remove('hidden'); $('#result').classList.remove('hidden'); }
+    const took = runStarted ? mmss(Date.now() - runStarted) : null;
+    setStep('finished', failed ? 'error' : 'done', failed ? 'Failed' : `${turns.length} paid model turns${took ? ` · finished in ${took}` : ''}`, turnsChip(turns));
+    show('bar', false);
+    showResult(st, failed, turns.length, took);
     return true;
   }
+  function showResult(st, failed, turnCount, took) {
+    const sym = st.ticker || runSym;
+    $('#r-ticker').textContent = sym;
+    $('#r-title').textContent = runOutputs.fetch_stocktwits_signals?.title ? ' · ' + runOutputs.fetch_stocktwits_signals.title : '';
+    $('#r-when').innerHTML = timeEl(new Date().toISOString());
+    $('#permalink').href = `/joke/${encodeURIComponent(st.id || runId)}`;
+    if (st.joke) { $('#joke').textContent = st.joke; $('#based').textContent = st.facts?.length ? 'Based on: ' + st.facts.slice(0, 3).map(cleanFact).join(' · ') : (st.basedOn ? 'Based on: ' + st.basedOn : ''); }
+    if (failed) { $('#error').textContent = failed; show('error', true); }
+    const res = $('#result'); show('result', true); res.classList.remove('new'); void res.offsetWidth; res.classList.add('new');
+    // Collapse the process to one line now that the joke is the point.
+    const doneSteps = ['fetch_stocktwits_signals', 'search_stock_news', 'write_joke'].filter((n) => dots[n].classList.contains('done')).length;
+    $('#summary-text').textContent = failed ? `Run failed after ${doneSteps} of 3 steps${took ? ` (${took})` : ''}.` : `${doneSteps} paid steps · ${turnCount} model turns${took ? ` · ${took}` : ''}`;
+    $('#run').classList.add('collapsed', 'done');
+    res.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+  $('#summary-toggle').addEventListener('click', () => {
+    const run = $('#run'); const open = run.classList.toggle('collapsed') === false;
+    $('#summary-toggle').setAttribute('aria-expanded', String(open));
+    $('#summary-toggle').textContent = open ? 'Hide details' : 'Show details';
+  });
+  // Clicking the collapsed summary text also opens it.
+  $('#summary-text').addEventListener('click', () => $('#summary-toggle').click());
+  $('#another').addEventListener('click', () => { ticker.value = ''; ticker.focus(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
 
   async function showRunCost(sym) {
     try {
       const { joke } = await (await fetch(`/api/jokes/latest?ticker=${sym}`)).json();
       if (!joke || !joke.paid || Date.now() - Date.parse(joke.createdAt) > 600000) return;
-      $('#based').textContent += `\nPaid on-chain: ${joke.paid.totalUsdc.toFixed(4)} USDC (StockTwits + Ceramic ${joke.paid.exactUsdc.toFixed(4)}, AI Gateway ${joke.paid.aiUsdc.toFixed(4)}).`;
+      $('#paid').textContent = `Paid on-chain: ${joke.paid.totalUsdc.toFixed(4)} USDC (StockTwits + Ceramic ${joke.paid.exactUsdc.toFixed(4)}, AI Gateway ${joke.paid.aiUsdc.toFixed(4)} settled for the joke and the agent's turns).`;
+      show('paid', true);
+      const turns = runPayments.filter((p) => p.label.includes('orchestrator') && p.ok);
+      $('[data-step="finished"]').parentElement.querySelector('.receipt').innerHTML = turnsChip(turns, joke.paid.aiUsdc);
+      $('#summary-text').textContent += ` · ${joke.paid.totalUsdc.toFixed(4)} USDC on-chain`;
     } catch {}
   }
   function showPaywall(body, sym, pwError) {
     const url = `${PUBLIC}/joke/${sym}`;
     $('#payurl').textContent = url; $('#paysym').textContent = sym;
-    $('#pwerr').classList.toggle('hidden', !pwError); $('#pwerr').textContent = pwError || '';
-    $('#paycurl').textContent = `// any x402 client works; with @x402/fetch:\nconst res = await fetchWithPayment("${url}", { method: "POST" });   // pays 0.10 USDC\nconst { poll } = await res.json();\n// then GET poll every few seconds until done === true; the JSON has joke, basedOn, steps, payments`;
+    $('#paycurl').textContent = `// any x402 client works; with @x402/fetch:\nconst res = await fetchWithPayment("${url}", { method: "POST" }); // pays 0.10 USDC\nconst { poll } = await res.json();\n// then GET poll every few seconds until done === true;\n// the JSON has joke, basedOn, steps and payments`;
     const cached = body.cached;
     if (cached) {
       $('#cachedticker').textContent = cached.ticker; $('#cachedjoke').textContent = cached.joke;
-      $('#cachedreceipts').innerHTML = (cached.payments || []).map(receiptChip).join('');
-      $('#cachedwrap').classList.remove('hidden');
+      $('#cachedwhen').innerHTML = cached.createdAt ? `(${timeEl(cached.createdAt)})` : '';
+      const row = $('#cachedreceipts'); row.innerHTML = receiptsRow(cached); wireBadges($('#paywall'), cached);
+      show('cachedwrap', true);
     }
-    $('#paywall').classList.remove('hidden');
-    setStep('started', 'error', pwError ? 'Not started.' : 'Not started: pay 0.10 USDC or use a coupon code.');
-    if (pwError) password.focus();
-    else password.focus();
+    show('run', false); show('bar', false);
+    show('paywall', true);
+    if (pwError) {
+      setPwHint(pwError, true);
+      password.focus(); password.select();
+    } else {
+      setPwHint('No coupon entered: the instructions below let your agent pay instead.', false);
+      $('#paywall').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
   }
 
   async function submit(sym, pw) {
-    clearInterval(timer); reset(); go.disabled = true;
-    const id = 'web-' + Math.random().toString(16).slice(2, 10); runId = id;
+    clearInterval(timer); clearInterval(clock); reset(); go.disabled = true; go.textContent = 'Working…';
+    const id = 'web-' + Math.random().toString(16).slice(2, 10); runId = id; runSym = sym; runStarted = 0;
     const url = `/agents/joke/${id}`;
     const headers = { 'content-type': 'application/json' };
     if (pw) headers['x-joke-password'] = pw;
+    const done = () => { go.disabled = false; go.textContent = 'Tell me a joke'; clearInterval(clock); };
     try {
       const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ kind: 'user', body: `Tell me a joke about ${sym}.` }) });
       if (res.status === 402 || res.status === 401) {
         let body = {}; try { body = await res.json(); } catch {}
-        if (res.status === 401) { savePassword(''); password.value = ''; }
+        if (res.status === 401) savePassword('');
         if (!body.cached) { try { body.cached = (await (await fetch(`/api/jokes/latest?ticker=${sym}`)).json()).joke; } catch {} }
-        showPaywall(body, sym, res.status === 401 ? 'That coupon code is not valid. Check it and try again, or let your agent pay.' : null);
-        go.disabled = false; return;
+        showPaywall(body, sym, res.status === 401 ? 'That coupon code is not valid. Check it and try again, or let your agent pay (see below).' : null);
+        done(); return;
       }
       if (!res.ok) throw new Error(`POST ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    } catch (err) { setStep('started', 'error', String(err.message || err)); go.disabled = false; return; }
+    } catch (err) { setStep('started', 'error', String(err.message || err)); show('bar', false); done(); return; }
     if (pw) savePassword(pw);
+    runStarted = Date.now();
     setStep('started', 'done', pw ? 'Accepted with coupon code.' : 'Accepted.');
-    setStep('fetch_stocktwits_signals', 'running', 'Next: waiting for the agent to call this step…');
+    setStep('fetch_stocktwits_signals', 'running', 'The agent is reading the data and deciding its next step…');
     setStep('search_stock_news', '', 'Not started.'); setStep('write_joke', '', 'Not started.');
-    setStep('finished', 'running', 'Working…');
-    const started = Date.now();
+    setStep('finished', 'running', workingLine(0));
+    clock = setInterval(() => { if (dots.finished.classList.contains('running')) { const t = runPayments.filter((p) => p.label.includes('orchestrator') && p.ok).length; dots.finished.parentElement.querySelector('.step-detail').textContent = workingLine(t); } }, 1000);
     timer = setInterval(async () => {
       try {
         const st = await (await fetch(`/joke/${id}`)).json();
-        if (render(st) || Date.now() - started > 300000) { clearInterval(timer); go.disabled = false; refreshFeed(); setTimeout(() => showRunCost(sym), 4000); }
+        if (render(st) || Date.now() - runStarted > 300000) { clearInterval(timer); done(); refreshFeed(); setTimeout(() => showRunCost(sym), 4000); }
       } catch {}
     }, 1500);
   }
   const STEP_KEY = { fetch_stocktwits_signals: 'stocktwits', search_stock_news: 'ceramic', write_joke: 'joke', finished: 'turns' };
   document.querySelectorAll('#steps li').forEach((li) => {
     const name = li.querySelector('.dot').dataset.step; const key = STEP_KEY[name]; if (!key) return;
-    li.classList.add('clickable'); li.title = 'Click to see what this step returned';
-    li.addEventListener('click', (e) => {
-      if (e.target.closest('a')) return;
+    const btn = li.querySelector('.steptitle'); btn.classList.add('clickable'); btn.title = 'See what this step returned';
+    const open = () => {
       let data = key === 'turns' ? runPayments.filter((p) => p.label.includes('orchestrator')) : runOutputs[name];
       if (!data || (Array.isArray(data) && !data.length)) data = { note: key === 'turns' ? 'Model turns are tallied when the agent finishes.' : 'This step has not returned yet.' };
       const links = runId ? `<a href="/joke/${runId}" target="_blank" rel="noopener">run status JSON</a> · <a href="/api/events?conversation=${runId}" target="_blank" rel="noopener">x402 gateway events</a>` : '';
-      toggleHood(li, key, data, links, null);
-    });
+      toggleHood($('#steps'), key, data, links, btn, li);
+    };
+    btn.addEventListener('click', (e) => { e.stopPropagation(); open(); });
+    li.addEventListener('click', (e) => { if (e.target.closest('a, button, .hood')) return; open(); });
   });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -325,71 +559,80 @@
   });
 
   // ---- live feed ----
-  let newest = null;
+  let newest = null, oldest = null, total = null;
   const seen = new Set();
   function jokeCard(j, isNew) {
-    const when = new Date(j.createdAt);
-    const pays = j.payments || [];
-    const turns = pays.filter((p) => p.label.includes('orchestrator'));
-    const find = (needle) => pays.find((p) => p.label.includes(needle));
-    const st = find('StockTwits symbols'), ce = find('Ceramic'), jk = find('AI Gateway joke');
-    const chip = (key, name, p) => `<button type="button" class="chip badge" data-k="${key}" title="See what ${name} returned">${name}${p && !p.tx ? ` ≤ ${money(p.authorizedUsdc)}` : ''} ▾</button>${p && p.tx ? `<a class="chip" href="${p.tx}" target="_blank" rel="noopener" title="USDC transfer on Basescan">${money(p.authorizedUsdc)} ↗</a>` : ''}`;
     const el = document.createElement('article');
     el.className = 'card' + (isNew ? ' new' : '');
     el.dataset.id = j.id;
-    el.innerHTML = `<div class="meta"><span><span class="ticker">${esc(j.ticker)}</span>${j.title ? ' · ' + esc(j.title) : ''}</span><span title="${when.toISOString()}">${when.toLocaleString()}${j.paidBy === 'x402' ? ' · paid via x402' : ''}</span></div>
+    el.innerHTML = `<div class="meta"><span><span class="ticker">${esc(j.ticker)}</span>${j.title ? ' · ' + esc(j.title) : ''}</span><span>${timeEl(j.createdAt)}</span></div>
       <p class="joke">${esc(j.joke)}</p>
-      <div class="step-detail">${esc((j.facts || []).slice(0, 3).join(' · '))}</div>
-      <div class="receipts">${chip('stocktwits', 'StockTwits', st)}${chip('ceramic', 'Ceramic', ce)}${chip('joke', 'AI Gateway joke', jk)}${chip('turns', `${turns.length} agent turns`, null)}${j.paid ? `<span class="chip"><b>paid ${j.paid.totalUsdc.toFixed(4)} USDC</b> on-chain</span>` : ''}</div>`;
-    const steps = j.steps || {};
-    el.querySelectorAll('.badge').forEach((b) => b.addEventListener('click', (e) => {
-      if (e.target.closest('a')) return;
-      const key = b.dataset.k;
-      const fallback = { note: 'The full response for this step was not archived (jokes made before 2026-10-16 20:10 UTC only kept their payments and facts).', facts: j.facts || [], payment: key === 'stocktwits' ? st : key === 'ceramic' ? ce : jk };
-      const data = key === 'turns' ? (turns.length ? turns : { note: 'No per-turn records for this joke.' }) : (steps[key] || fallback);
-      const links = `<a href="/joke/${encodeURIComponent(j.conversationId)}" target="_blank" rel="noopener">run status JSON</a> · <a href="/api/events?conversation=${encodeURIComponent(j.conversationId)}" target="_blank" rel="noopener">x402 gateway events</a>`;
-      toggleHood(el, key, data, links, b);
-    }));
+      <div class="step-detail">${esc((j.facts || []).slice(0, 3).map(cleanFact).join(' · '))}</div>
+      <div class="receipts">${receiptsRow(j)}</div>`;
+    wireBadges(el, j);
     return el;
   }
   function sparkline(perHour) {
     const svg = $('#spark'); const W = 240, H = 48;
     const now = Date.now(); const buckets = [];
-    for (let i = 23; i >= 0; i--) { const t = new Date(now - i * 3600e3); t.setMinutes(0, 0, 0); buckets.push({ key: t.toISOString().slice(0, 13), count: 0 }); }
+    for (let i = 23; i >= 0; i--) { const t = new Date(now - i * 3600e3); t.setMinutes(0, 0, 0); buckets.push({ key: t.toISOString().slice(0, 13), count: 0, at: t }); }
     for (const h of perHour || []) { const b = buckets.find((x) => x.key === String(h.hour).slice(0, 13)); if (b) b.count = h.count; }
     const max = Math.max(1, ...buckets.map((b) => b.count)); const bw = W / 24;
-    svg.innerHTML = buckets.map((b, i) => `<rect x="${(i * bw + 1).toFixed(1)}" y="${(H - (b.count / max) * (H - 4)).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${((b.count / max) * (H - 4)).toFixed(1)}" rx="1.5" fill="${b.count ? 'var(--accent)' : 'var(--line)'}"><title>${b.key.replace('T', ' ')}:00 — ${b.count}</title></rect>`).join('');
+    svg.innerHTML = buckets.map((b, i) => `<rect x="${(i * bw + 1).toFixed(1)}" y="${(H - (b.count / max) * (H - 4)).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${((b.count / max) * (H - 4)).toFixed(1)}" rx="1.5" fill="${b.count ? 'var(--accent)' : 'var(--line)'}"><title>${b.at.toLocaleString([], { hour: 'numeric' })} — ${b.count}</title></rect>`).join('');
+    const peak = buckets.reduce((a, b) => (b.count > a.count ? b : a), buckets[0]);
+    const sum = buckets.reduce((s, b) => s + b.count, 0);
+    $('#sparkpeak').textContent = sum ? `${sum} in 24h · peak ${peak.count} at ${peak.at.toLocaleTimeString([], { hour: 'numeric' })}` : 'none in the last 24h';
   }
   async function refreshStats() {
     try {
       const s = await (await fetch('/api/stats')).json();
+      total = s.count;
       $('#s-count').textContent = s.count;
+      $('#s-count-detail').textContent = s.tickers ? `${s.tickers} ticker${s.tickers === 1 ? '' : 's'}` : '';
+      $('#feedcount').textContent = total ? `${total} joke${total === 1 ? '' : 's'}` : '';
       if (s.chain) {
         $('#s-paid').textContent = s.chain.paidUsdc.toFixed(4);
         const by = s.chain.paidBySeller || {};
-        $('#s-paid-detail').textContent = '· ' + Object.keys(by).map((k) => `${k} ${by[k].toFixed(4)}`).join(' · ') + ` · ${s.chain.paidCount} transfers`;
-      } else { $('#s-paid').textContent = '–'; $('#s-paid-detail').textContent = '(chain data unavailable)'; }
+        const keys = Object.keys(by).sort((a, b) => (SELLER_ORDER.indexOf(a) + 1 || 99) - (SELLER_ORDER.indexOf(b) + 1 || 99));
+        $('#s-paid-detail').textContent = keys.map((k) => `${k} ${by[k].toFixed(3)}`).join(' · ') + ` · ${s.chain.paidCount} transfers`;
+      } else { $('#s-paid').textContent = '–'; $('#s-paid-detail').textContent = 'chain data unavailable'; }
       $('#s-earned').textContent = s.chain ? s.chain.earnedUsdc.toFixed(2) : Number(s.earnedFromJokesUsdc).toFixed(2);
+      $('#s-earned-detail').textContent = s.paidJokes ? `${s.paidJokes} paid joke${s.paidJokes === 1 ? '' : 's'} · 0.10 each` : '';
       sparkline(s.perHour);
+      updateMore();
     } catch {}
   }
+  function updateMore() { show('morewrap', total != null && seen.size < total && oldest != null); }
   async function refreshFeed() {
     try {
       const url = newest ? `/api/jokes?after=${encodeURIComponent(newest)}&limit=50` : '/api/jokes?limit=30';
       const { jokes } = await (await fetch(url)).json();
       const feed = $('#feed');
       const fresh = jokes.filter((j) => !seen.has(j.id));
+      tickTimes();
       if (!fresh.length) return;
       $('#feedempty')?.remove();
-      const ordered = newest ? fresh : fresh.slice().reverse();   // prepend newest last so it ends up on top
-      for (const j of ordered) { seen.add(j.id); feed.prepend(jokeCard(j, !!newest)); if (!newest || j.createdAt > newest) newest = j.createdAt; }
-      if (newest === null && jokes.length) newest = jokes[0].createdAt;
+      // The first page is newest-first; `after` pages are oldest-first. Prepend oldest first so the newest ends on top.
+      const ordered = fresh.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      for (const j of ordered) { seen.add(j.id); feed.prepend(jokeCard(j, !!newest)); if (!newest || j.createdAt > newest) newest = j.createdAt; if (!oldest || j.createdAt < oldest) oldest = j.createdAt; }
       refreshStats();
     } catch {}
   }
+  async function loadOlder() {
+    const btn = $('#more'); btn.disabled = true; btn.textContent = 'Loading…';
+    try {
+      const { jokes } = await (await fetch(`/api/jokes?before=${encodeURIComponent(oldest)}&limit=30`)).json();
+      const feed = $('#feed');
+      for (const j of jokes) { if (seen.has(j.id)) continue; seen.add(j.id); feed.appendChild(jokeCard(j, false)); if (!oldest || j.createdAt < oldest) oldest = j.createdAt; }
+      if (!jokes.length) total = seen.size;
+    } catch {}
+    btn.disabled = false; btn.textContent = 'Show older jokes'; updateMore();
+  }
+  $('#more').addEventListener('click', loadOlder);
   refreshFeed(); refreshStats();
   setInterval(refreshFeed, 3000);
   setInterval(refreshStats, 15000);
+  setInterval(tickTimes, 30000);
 })();
 </script>
 </body>

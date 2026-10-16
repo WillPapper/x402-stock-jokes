@@ -7,6 +7,8 @@ Findings from a hands-on pass over the live page (https://jokes.papper.me, byte-
 - Submit with a wrong coupon (401).
 - Submit with the coupon (full MSFT run, about 90 seconds, then the result).
 
+**Status (2026-10-16):** all 25 items below are implemented in `public/index.html` (plus a `before` cursor on `/api/jokes` for item 16) and verified against the live API through a local proxy: the 402 and 401 paths, a full coupon run (AMD, 1:04, 0.0078 USDC on-chain), the under-the-hood panels, a 390px frame, and light mode. Item 25 turned out not to be a bug (see its note). Line numbers in the items refer to the page as it was before the changes.
+
 Items are ordered by how much they would change the experience. Each has what was seen, why it matters, and a concrete suggestion. Line numbers refer to `public/index.html`.
 
 ---
@@ -176,11 +178,11 @@ There is no `<link rel="icon">`, so the tab shows the default globe. An inline S
 
 ### 25. Possible ordering bug when several jokes arrive in one poll
 
-`refreshFeed` prepends `fresh` in API order (newest first) when `newest` is already set (line 384). If two or more jokes land between two 3-second polls, the older one ends up on top. Not observed today (jokes arrived in separate polls) but the code path is easy to hit when another agent is active. Reverse `fresh` in both branches.
+On closer reading this was not a bug: `/api/jokes?after=` returns rows oldest-first, so prepending them in API order already leaves the newest on top. The feed now sorts incoming rows by `createdAt` before prepending regardless of which branch produced them, so the ordering no longer depends on the API's sort direction.
 
 ---
 
-## Quick wins (under an hour total)
+## Quick wins (under an hour total, all done)
 
 1. `a { color:var(--accent) }` (item 9).
 2. Fixed seller order in the stats label (item 10).

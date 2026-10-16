@@ -211,8 +211,9 @@ async function withSettled(rows: JokeRow[]): Promise<(JokeRow & { paid: { exactU
 }
 app.get('/api/jokes', async (c) => {
 	const after = c.req.query('after') || undefined;
+	const before = c.req.query('before') || undefined;
 	const limit = Number(c.req.query('limit') ?? 30);
-	return c.json({ jokes: await withSettled(await listJokes({ after, limit })), serverTime: new Date().toISOString() });
+	return c.json({ jokes: await withSettled(await listJokes({ after, before, limit })), serverTime: new Date().toISOString() });
 });
 app.get('/api/jokes/latest', async (c) => {
 	const ticker = (c.req.query('ticker') ?? '').toUpperCase().replace(/[^A-Z0-9.]/g, '');
