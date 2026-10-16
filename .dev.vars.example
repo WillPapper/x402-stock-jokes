@@ -1,20 +1,11 @@
-# Local secrets for `bun run dev` and the scripts in scripts/. Copy to .dev.vars (gitignored).
+# Secrets for `bun run dev` and the scripts in scripts/. Copy to .dev.vars (gitignored).
 # Production: upload these four with `wrangler secret bulk` (see README "Deploy").
+# Non-secret settings (models, spend caps) live in wrangler.jsonc `vars`, not here.
 
 CLOUDFLARE_ACCOUNT_ID=         # `cf accounts list` or `wrangler whoami`
 CLOUDFLARE_API_TOKEN=          # Account > Workers AI > Read (+ AI Gateway > Run)
 EVM_BASE_ADDRESS=              # `bun run wallet:new` fills these two, or paste your own
 EVM_BASE_PRIVATE_KEY=          # 0x-prefixed; fund the address with USDC + a little ETH on Base mainnet
 
-# ---- Plain-text vars (NOT secrets) ----
-# These are defined in wrangler.jsonc `vars` and are the source of truth for the
-# Worker in both `bun run dev` and production. Set them here only to override
-# locally. The scripts in scripts/ read ORCHESTRATOR_MODEL and BASE_RPC_URL from
-# this file (they do not read wrangler.jsonc).
-#
-# ORCHESTRATOR_MODEL=alibaba/qwen3.8-27b      # the agent's model, one of AI Gateway's machine-payment models:
-# JOKE_MODEL=google/gemma-4-26b-a4b-it        #   openai/gpt-oss-20b, z-ai/glm-4.7-flash, google/gemma-4-26b-a4b-it, alibaba/qwen3.8-27b
-# MAX_USDC_PER_DATA_CALL=0.01                 # cap per StockTwits/Ceramic payment (they quote 0.001)
-# MAX_USDC_PER_INFERENCE=0.25                 # cap per AI Gateway authorization ceiling (Qwen quotes ~0.13)
-# MAX_USDC_PER_ISOLATE=5                      # total a single Worker isolate may authorize before refusing
-# BASE_RPC_URL=https://mainnet.base.org       # scripts only: RPC for balance checks and the Permit2 approval
+# Optional, scripts only: RPC used for balance checks and the Permit2 approval.
+# BASE_RPC_URL=https://mainnet.base.org

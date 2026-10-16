@@ -5,9 +5,11 @@ import { base } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { formatUsdc } from '../src/lib/budget.ts';
 import { PERMIT2, USDC_BASE, decodePaymentRequired } from '../src/lib/x402.ts';
-import { loadDevVars, privateKey, requireEnv } from './_env.ts';
+import { loadDevVars, privateKey, requireEnv, workerVars } from './_env.ts';
 
 loadDevVars();
+const vars = workerVars();
+const orchestratorModel = vars.ORCHESTRATOR_MODEL ?? 'alibaba/qwen3.8-27b';
 const ok = (msg: string) => console.log(`✓ ${msg}`);
 const bad = (msg: string) => {
 	console.log(`✗ ${msg}`);
@@ -55,10 +57,10 @@ const token = requireEnv('CLOUDFLARE_API_TOKEN');
 const verify = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', { headers: { authorization: `Bearer ${token}` } });
 const v = (await verify.json()) as { success?: boolean; result?: { status?: string } };
 (v.success ? ok : bad)(`Cloudflare token ${v.result?.status ?? 'invalid'}`);
-await quote(`AI Gateway /ai/run (${process.env.ORCHESTRATOR_MODEL ?? 'alibaba/qwen3.8-27b'})`, `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run`, {
+await quote(`AI Gateway /ai/run (${orchestratorModel})`, `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run`, {
 	method: 'POST',
 	headers: { authorization: `Bearer ${token}`, 'payment-method': 'x402', 'content-type': 'application/json' },
-	body: JSON.stringify({ model: process.env.ORCHESTRATOR_MODEL ?? 'alibaba/qwen3.8-27b', input: { messages: [{ role: 'user', content: 'ping' }], max_tokens: 8 } }),
+	body: JSON.stringify({ model: orchestratorModel, input: { messages: [{ role: 'user', content: 'ping' }], max_tokens: 8 } }),
 });
 
 console.log(failures ? `\n${failures} problem(s).` : '\nReady.');

@@ -38,7 +38,7 @@ Spend caps and model choices are plain-text vars in `wrangler.jsonc`, enforced *
 | `MAX_USDC_PER_INFERENCE` | `0.25` | cap per AI Gateway authorization ceiling (Qwen quotes about 0.13) |
 | `MAX_USDC_PER_ISOLATE` | `5` | total one Worker isolate may authorize before it refuses |
 
-They apply in `bun run dev` and in production; `.dev.vars` can override them locally (see `.dev.vars.example`). The four secrets never go in `wrangler.jsonc`.
+They apply in `bun run dev`, in production, and in the scripts, which read `wrangler.jsonc` too. `.dev.vars` holds only the four secrets.
 
 ## Setup
 

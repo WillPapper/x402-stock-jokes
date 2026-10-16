@@ -16,6 +16,19 @@ export function loadDevVars(path = '.dev.vars'): void {
 	}
 }
 
+/** Non-secret settings come from wrangler.jsonc `vars`, the same source the Worker uses. */
+export function workerVars(path = 'wrangler.jsonc'): Record<string, string> {
+	if (!existsSync(path)) return {};
+	const jsonc = readFileSync(path, 'utf8');
+	const json = jsonc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1');
+	try {
+		const vars = (JSON.parse(json) as { vars?: Record<string, unknown> }).vars ?? {};
+		return Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)]));
+	} catch {
+		return {};
+	}
+}
+
 export function requireEnv(name: string): string {
 	const v = process.env[name];
 	if (!v) {
