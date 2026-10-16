@@ -24,40 +24,49 @@ const SYSTEM = [
 export async function writeJokeFor(symbol: string, facts: string[], model = config.jokeModel): Promise<JokeResult> {
 	const mark = ledger.mark();
 	const paid = paidInferenceFetch(`AI Gateway joke (${model})`);
-	const res = await paid(config.aiRunUrl, {
-		method: 'POST',
-		headers: { authorization: `Bearer ${config.apiToken}`, 'payment-method': 'x402', 'content-type': 'application/json' },
-		body: JSON.stringify({
-			model,
-			input: {
-				messages: [
-					{ role: 'system', content: SYSTEM },
-					{ role: 'user', content: `Ticker: ${symbol}\nFacts:\n${facts.map((f) => `- ${f}`).join('\n')}` },
-				],
-				max_tokens: 600,
-				temperature: 0.9,
-				// Thinking models (Gemma 4, Qwen 3.8, GLM 4.7) otherwise spend the whole
-				// budget reasoning about the joke; gpt-oss honors reasoning_effort instead.
-				...(model.startsWith('openai/') ? { reasoning_effort: 'low' } : { chat_template_kwargs: { enable_thinking: false } }),
-			},
-		}),
+	const body = JSON.stringify({
+		model,
+		input: {
+			messages: [
+				{ role: 'system', content: SYSTEM },
+				{ role: 'user', content: `Ticker: ${symbol}\nFacts:\n${facts.map((f) => `- ${f}`).join('\n')}` },
+			],
+			max_tokens: 600,
+			temperature: 0.9,
+			// Thinking models (Gemma 4, Qwen 3.8, GLM 4.7) otherwise spend the whole
+			// budget reasoning about the joke; gpt-oss honors reasoning_effort instead.
+			...(model.startsWith('openai/') ? { reasoning_effort: 'low' } : { chat_template_kwargs: { enable_thinking: false } }),
+		},
 	});
-	const text = await res.text();
-	let body: { success?: boolean; errors?: { message?: string }[]; result?: { choices?: { finish_reason?: string; message?: { content?: string | null; reasoning_content?: string | null } }[]; usage?: Record<string, unknown> } } = {};
+	// The gateway's facilitator occasionally answers 503 "verify returned 403" on
+	// a fresh authorization; one retry after a short pause has always succeeded.
+	let res!: Response;
+	let text = '';
+	for (let attempt = 1; attempt <= 2; attempt++) {
+		res = await paid(config.aiRunUrl, {
+			method: 'POST',
+			headers: { authorization: `Bearer ${config.apiToken}`, 'payment-method': 'x402', 'content-type': 'application/json' },
+			body,
+		});
+		text = await res.text();
+		if (res.status < 500 || attempt === 2) break;
+		await new Promise((r) => setTimeout(r, 4000));
+	}
+	let parsed: { success?: boolean; errors?: { message?: string }[]; result?: { choices?: { finish_reason?: string; message?: { content?: string | null; reasoning_content?: string | null } }[]; usage?: Record<string, unknown> } } = {};
 	try {
-		body = JSON.parse(text);
+		parsed = JSON.parse(text);
 	} catch {
 		/* handled below */
 	}
-	if (!res.ok || !body.success) {
-		throw new Error(`AI Gateway joke call failed: HTTP ${res.status} ${body.errors?.map((e) => e.message).join('; ') ?? text.slice(0, 200)}`);
+	if (!res.ok || !parsed.success) {
+		throw new Error(`AI Gateway joke call failed: HTTP ${res.status} ${parsed.errors?.map((e) => e.message).join('; ') ?? text.slice(0, 200)}`);
 	}
-	const message = body.result?.choices?.[0]?.message;
+	const message = parsed.result?.choices?.[0]?.message;
 	const joke = (message?.content ?? '').trim();
 	if (!joke) {
-		throw new Error(`AI Gateway (${model}) returned no joke text: finish_reason=${body.result?.choices?.[0]?.finish_reason ?? 'unknown'}. Do not call write_joke again; tell the user the joke step failed.`);
+		throw new Error(`AI Gateway (${model}) returned no joke text: finish_reason=${parsed.result?.choices?.[0]?.finish_reason ?? 'unknown'}. Do not call write_joke again; tell the user the joke step failed.`);
 	}
-	return { joke, model, usage: body.result?.usage ?? null, payments: ledger.since(mark) };
+	return { joke, model, usage: parsed.result?.usage ?? null, payments: ledger.since(mark) };
 }
 
 /** The tool is created per conversation so the finished joke can be handed to the agent's finish hook. */

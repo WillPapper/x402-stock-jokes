@@ -211,7 +211,7 @@
       if (failed) { $('#error').textContent = failed; $('#error').classList.remove('hidden'); $('#result').classList.remove('hidden'); }
       return true;
     }
-    setStep('finished', 'running', `Working… ${turns.length} paid model turn${turns.length === 1 ? '' : 's'} so far`, turns.map(receiptChip).join(' '));
+    setStep('finished', 'running', 'Working… the model turns are tallied when the agent finishes.', '');
     return false;
   }
 
