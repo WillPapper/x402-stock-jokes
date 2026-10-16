@@ -101,7 +101,7 @@ Open the page, type a ticker and the password, watch the three steps pay and com
 
 ```sh
 curl -X POST http://localhost:5173/agents/joke/demo-1 \
-  -H 'content-type: application/json' -H 'x-joke-password: connect' \
+  -H 'content-type: application/json' -H 'x-joke-password: <JOKE_PASSWORD>' \
   -d '{"kind":"user","body":"Tell me a joke about NVDA."}'
 
 curl http://localhost:5173/agents/joke/demo-1           # snapshot: tool calls, reply, payments in metadata
