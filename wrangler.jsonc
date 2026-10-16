@@ -6,11 +6,6 @@
 	// Workers Traces shows each agent response as a trace with agent-level
 	// spans: https://flueframework.com/docs/guide/observability/#cloudflare
 	"observability": { "traces": { "enabled": true } },
-	// Keyless `cloudflare/...` models run through this Workers AI binding and
-	// go through AI Gateway by default. It reaches your Cloudflare account even
-	// in local dev (`npx wrangler login` first):
-	// https://flueframework.com/docs/guide/models/#cloudflare-workers-ai-cloudflare-only
-	"ai": { "binding": "AI" },
 	// Non-secret knobs. Secrets (account id, API token, wallet key) live in
 	// .dev.vars locally and `wrangler secret put` in production.
 	"vars": {

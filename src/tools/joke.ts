@@ -33,13 +33,16 @@ export async function writeJokeFor(symbol: string, facts: string[], model = conf
 					{ role: 'system', content: SYSTEM },
 					{ role: 'user', content: `Ticker: ${symbol}\nFacts:\n${facts.map((f) => `- ${f}`).join('\n')}` },
 				],
-				max_tokens: 400,
+				// GLM 4.7 Flash always "thinks" first (about 1,000 tokens) before the
+				// joke; gpt-oss models honor a low reasoning effort instead.
+				max_tokens: 1800,
 				temperature: 0.9,
+				...(model.startsWith('openai/') ? { reasoning_effort: 'low' } : {}),
 			},
 		}),
 	});
 	const text = await res.text();
-	let body: { success?: boolean; errors?: { message?: string }[]; result?: { choices?: { message?: { content?: string | null; reasoning_content?: string | null } }[]; usage?: Record<string, unknown> } } = {};
+	let body: { success?: boolean; errors?: { message?: string }[]; result?: { choices?: { finish_reason?: string; message?: { content?: string | null; reasoning_content?: string | null } }[]; usage?: Record<string, unknown> } } = {};
 	try {
 		body = JSON.parse(text);
 	} catch {
@@ -50,14 +53,16 @@ export async function writeJokeFor(symbol: string, facts: string[], model = conf
 	}
 	const message = body.result?.choices?.[0]?.message;
 	const joke = (message?.content ?? '').trim();
-	if (!joke) throw new Error('AI Gateway returned no joke text (the model spent its tokens on reasoning); try again');
+	if (!joke) {
+		throw new Error(`AI Gateway (${model}) returned no joke text: finish_reason=${body.result?.choices?.[0]?.finish_reason ?? 'unknown'}. Do not call write_joke again; tell the user the joke step failed.`);
+	}
 	return { joke, model, usage: body.result?.usage ?? null, payments: ledger.since(mark) };
 }
 
 export const writeJoke = defineTool({
 	name: 'write_joke',
 	description:
-		'Step 3. Pay Cloudflare AI Gateway (x402 machine payments, USDC on Base) to generate the joke from the facts gathered in steps 1 and 2. Pass 3 to 8 short factual bullet points. Call this last, exactly once.',
+		'Step 3. Pay Cloudflare AI Gateway (x402 machine payments, USDC on Base) to generate the joke from the facts gathered in steps 1 and 2. Pass 3 to 8 short factual bullet points. Call this last, exactly once; if it fails, report the failure instead of calling it again.',
 	input: v.object({
 		symbol: v.pipe(v.string(), v.minLength(1), v.maxLength(12)),
 		facts: v.pipe(v.array(v.pipe(v.string(), v.maxLength(300))), v.minLength(1), v.maxLength(12)),

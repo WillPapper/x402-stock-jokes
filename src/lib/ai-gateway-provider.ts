@@ -55,7 +55,8 @@ export function completionToSse(result: NonNullable<AiRunEnvelope['result']>): s
 	for (const choice of result.choices ?? []) {
 		const m = choice.message ?? {};
 		const delta: Record<string, unknown> = { role: m.role ?? 'assistant' };
-		if (m.reasoning_content) delta.reasoning_content = m.reasoning_content;
+		const reasoning = m.reasoning_content ?? (m as { reasoning?: string | null }).reasoning;
+		if (reasoning) delta.reasoning_content = reasoning;
 		if (m.content) delta.content = m.content;
 		if (m.tool_calls?.length) {
 			delta.tool_calls = m.tool_calls.map((tc, index) => ({ index, id: tc.id, type: tc.type ?? 'function', function: { name: tc.function?.name ?? '', arguments: tc.function?.arguments ?? '' } }));
@@ -65,6 +66,28 @@ export function completionToSse(result: NonNullable<AiRunEnvelope['result']>): s
 	}
 	if (result.usage) chunks.push({ ...base, choices: [], usage: result.usage });
 	return chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n';
+}
+
+/**
+ * Workers AI's chat schema wants `content` as a string on every message, while
+ * the OpenAI SDK (and pi-ai) send system/user content as part arrays and
+ * assistant tool-call messages with `content: null`. Flatten both.
+ */
+export function normalizeMessagesForWorkersAi(messages: unknown): unknown {
+	if (!Array.isArray(messages)) return messages;
+	return messages.map((m) => {
+		if (!m || typeof m !== 'object') return m;
+		const msg = { ...(m as Record<string, unknown>) };
+		const content = msg.content;
+		if (Array.isArray(content)) {
+			msg.content = content
+				.map((part) => (part && typeof part === 'object' && 'text' in part ? String((part as { text: unknown }).text ?? '') : typeof part === 'string' ? part : ''))
+				.join('');
+		} else if (content === null || content === undefined) {
+			msg.content = '';
+		}
+		return msg;
+	});
 }
 
 export interface X402AiGatewayOptions {
@@ -91,6 +114,9 @@ export function createAiRunFetch(options: X402AiGatewayOptions): typeof fetch {
 		}
 		const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
 		const { model, stream: _stream, stream_options: _so, store: _store, ...rest } = body;
+		if ('messages' in rest) rest.messages = normalizeMessagesForWorkersAi(rest.messages);
+		// Orchestration turns are tool routing; keep gpt-oss reasoning short and cheap.
+		if (typeof model === 'string' && model.startsWith('openai/') && !('reasoning_effort' in rest)) rest.reasoning_effort = 'low';
 		const res = await options.paidFetch(aiRunUrl, {
 			method: 'POST',
 			headers: { authorization: `Bearer ${options.apiToken}`, 'payment-method': 'x402', 'content-type': 'application/json' },

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Budget, BudgetExceededError, formatUsdc, usdToBaseUnits } from '../src/lib/budget.ts';
-import { completionToSse } from '../src/lib/ai-gateway-provider.ts';
+import { completionToSse, normalizeMessagesForWorkersAi } from '../src/lib/ai-gateway-provider.ts';
 import { decodePaymentRequired, decodeReceipt } from '../src/lib/x402.ts';
 
 describe('usdc units', () => {
@@ -57,5 +57,19 @@ describe('completionToSse', () => {
 		expect(first.choices[0].delta.reasoning_content).toBe('think');
 		expect(JSON.parse(events[1]!).choices[0].finish_reason).toBe('tool_calls');
 		expect(JSON.parse(events[2]!).usage.completion_tokens).toBe(2);
+	});
+});
+
+describe('normalizeMessagesForWorkersAi', () => {
+	test('flattens part arrays and null content to strings', () => {
+		const out = normalizeMessagesForWorkersAi([
+			{ role: 'system', content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] },
+			{ role: 'assistant', content: null, tool_calls: [{ id: 't' }] },
+			{ role: 'tool', content: 'ok', tool_call_id: 't' },
+		]) as { content: unknown; tool_calls?: unknown }[];
+		expect(out[0]!.content).toBe('ab');
+		expect(out[1]!.content).toBe('');
+		expect(out[1]!.tool_calls).toBeDefined();
+		expect(out[2]!.content).toBe('ok');
 	});
 });
