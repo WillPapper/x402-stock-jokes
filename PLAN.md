@@ -1,89 +1,103 @@
 # x402 Stock Jokes — Implementation Plan
 
-Status: **draft for review** (2026-10-15). Nothing below is built yet.
+Status: **revised after review, 2026-10-15.** Decisions from review are folded in (section 6). Nothing is built yet.
 
 ## 1. Goal
 
-A Flue agent on Cloudflare Workers that, given a ticker, produces a joke about that stock. Every upstream call is paid per request with USDC on Base via x402. No upstream API keys.
+A Flue agent on Cloudflare Workers that, given a ticker, produces a joke about that stock. Every upstream call, including the agent's own model turns, is paid per request with USDC on Base via x402. No upstream API keys other than the Cloudflare token that AI Gateway machine payments require alongside the payment.
 
 ```
-user: "tell me a joke about NVDA"
+user: "tell me a joke about NVDA"           (HTML page or curl)
   │
-  ├─ Step 1  StockTwits (x402, Cloudflare Monetization Gateway)  → price points + bull/bear sentiment + "why it's trending"
+  │  Flue agent StockJoker — its own model turns run on AI Gateway /ai/run, paid with x402
+  │
+  ├─ Step 1  StockTwits (x402, Cloudflare Monetization Gateway)  → symbol details + "why it's trending"
   ├─ Step 2  Ceramic search (x402, Cloudflare Monetization Gateway) → recent news headlines
   └─ Step 3  Cloudflare AI Gateway /ai/run (x402 machine payments)  → the joke
   │
-  └─ reply: joke + the data it riffs on + Basescan receipts for each payment
+  └─ reply: joke + the data it riffs on + Basescan receipts for every payment
 ```
 
-## 2. What the research established (verified live today unless noted)
+## 2. What the research established
+
+Verified live today unless marked otherwise.
 
 ### StockTwits Monetization Gateway (x402) — preview
 - Base URL `https://api-staging-mgw.stocktwits.com`. Priced: `GET /api/2/symbols/*`, 0.001 USD/request, USDC on Base mainnet (`eip155:8453`), x402 v2 `exact` scheme. Only `GET/HEAD/OPTIONS`. Geo-restricted (403 outside supported countries).
 - Probed unpaid:
-  - `GET /api/2/symbols/show/{SYM}.json` → **402** (documented). Returns only symbol metadata (title, exchange, watchlist_count). No price, no sentiment.
-  - `GET /api/2/symbols/trending/{SYM}.json` → **402** (matches the `symbols/*` rule). Per the spec it returns `trending`, `trends.summary` ("why it's trending"), `sector`, `industry`.
-  - `GET /api/2/streams/symbol/{SYM}.json` → **200, free** through the same gateway. 30 recent messages with `entities.sentiment.basic` (Bullish/Bearish/null), `prices[].price` (price at post time, so a mini time series), and `symbols[].sentiment_change` / `volume_change`.
-- **Gap:** the dedicated sentiment/price-chart endpoints (`/api-middleware/external/sentiment/v2/...`) require Basic Auth and are *not* exposed over x402 (404 on the gateway host). See Open Question 1.
-- Official TS client snippet uses `@x402/core` + `@x402/evm` + `@x402/fetch` + `viem`, `x402Client.fromConfig({ schemes, spendControls: { maxAmountPerPayment: "$0.01" } })`.
+  - `GET /api/2/symbols/show/{SYM}.json` → **402**. Returns symbol metadata: title, exchange, instrument class, watchlist_count, trade status.
+  - `GET /api/2/symbols/trending/{SYM}.json` → **402**. Per the spec: `trending`, `trends.summary` (why it's trending), `sector`, `industry`, `last_updated`.
+  - The dedicated sentiment and price-chart endpoints need Basic Auth and are not on the gateway. **Decision: use only the two paid endpoints.** Price movement and sentiment come from the trending summary text, which is what the preview sells to agents.
+- Official TS client: `@x402/core` + `@x402/evm` + `@x402/fetch` + `viem`; `x402Client.fromConfig({ schemes: [{ network: "eip155:*", client: new ExactEvmScheme(signer) }], spendControls: { maxAmountPerPayment: "$0.01" } })`.
 
 ### Ceramic Search
-- `POST https://api.ceramic.ai/search` with `{"query": "..."}` → **402** unpaid, quote: 1000 base units (0.001 USDC), `eip155:8453`, `maxTimeoutSeconds: 3600`. Response shape `result.results[] { title, url, description }`.
-- Reference implementation: `github.com/CeramicTeam/ceramic-x402-search-agent` (budget-guarded signer pattern, receipt decoding; we will adapt `src/search.ts` from it).
+- `POST https://api.ceramic.ai/search` with `{"query": "..."}` → **402** unpaid; quote 1000 base units (0.001 USDC), `eip155:8453`, `maxTimeoutSeconds: 3600`. Response `result.results[] { title, url, description }`.
+- Reference implementation `github.com/CeramicTeam/ceramic-x402-search-agent`: budget-guarded signer, receipt decoding. We adapt its `src/search.ts`.
 
 ### Cloudflare AI Gateway machine payments (x402)
-- `POST https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run` with headers `Authorization: Bearer $CLOUDFLARE_API_TOKEN` **and** `Payment-Method: x402`. Body `{ "model": "z-ai/glm-4.7-flash", "input": { "max_tokens": N, "messages": [...] } }`.
+- `POST https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run`, headers `Authorization: Bearer $CLOUDFLARE_API_TOKEN` and `Payment-Method: x402`, body `{ "model": "...", "input": { "messages": [...], "max_tokens": N } }`. Universal endpoint only, per the docs.
 - Eligible models: `z-ai/glm-4.7-flash`, `google/gemma-4-26b-a4b-it`, `openai/gpt-oss-20b`, `alibaba/qwen3.8-27b`.
-- Flow: 402 → wallet signs authorization for the *maximum* → retry with `PAYMENT-SIGNATURE` → actual token cost deducted. Requires a US Cloudflare account with a card on file (not verified from here; see Open Question 3).
-- Not verified: exact response envelope for `/ai/run` (docs list `result`, `usage`, `model`, `provider`). First task in Step 3 is to hit it once with curl and pin the parser to the real shape.
+- Flow: 402 → wallet signs an authorization for the *maximum* → retry with `PAYMENT-SIGNATURE` → actual token cost deducted.
+- Account is confirmed eligible (Monetization Gateway active). **No fallbacks.**
+- Not verified yet (needs the account token): the `/ai/run` response envelope, whether `input.tools` works for tool calling, whether `/ai/run` streams, and whether the OpenAI-compatible `/ai/v1/chat/completions` path also accepts `Payment-Method: x402`. These are the Step 0 spike.
 
-### Flue (v2.3.0)
-- Scaffold: `npx @flue/cli init <dir> --target cloudflare`. Generates `flue.config.ts`, `vite.config.ts` (`flue()` then `cloudflare()`), `wrangler.jsonc` (`nodejs_compat`, compat date ≥ 2026-04-01, `new_sqlite_classes` migrations), `src/app.ts` (Hono), `src/agents/hello.ts`.
-- Agent = exported capitalized function in a `'use agent'` file; returns the system prompt; `useModel('provider/model')`; `useTool(defineTool({...}))` with **Valibot** schemas; `durable: true` gives `step.do(name, fn)` for exactly-once-recorded side effects (exactly what a payment needs); `usePersistentState` for durable per-conversation state.
-- `cloudflare/@cf/...` model specifiers run on Workers AI keylessly on the Cloudflare target (AI Gateway enabled by default). `import { env } from 'cloudflare:workers'` for secrets/bindings.
-- HTTP: `createAgentRouter(Agent)` mounted in `app.ts` → `POST /agents/<name>/:id` (202, fire-and-forget), `GET` same URL for snapshot or `?view=updates&offset=...&live=sse`.
-- Deploy: `npx vite build` then `npx wrangler deploy`. Secrets via `.dev.vars` locally, `wrangler secret put` in prod.
+### Flue 2.3.0 and how its model layer can pay with x402 (from reading the installed packages)
+- Flue agents call models through `@earendil-works/pi-ai`. pi-ai's `ProviderRequestOptions` accepts `fetch?: FetchFunction` and `headers?`, and the `openai-completions` adapter passes both into the OpenAI SDK client it builds (`dist/api/openai-completions.js`, `createClient(model, ctx, apiKey, options.headers, options.fetch, ...)`). The adapter always requests `stream: true`.
+- `createProvider({ id, auth, models, api })` (from `@earendil-works/pi-ai/models`) accepts `api: { stream, streamSimple }`. Wrapping `openAICompletionsApi()` so every call gets `{ fetch: paidFetch, headers: { 'Payment-Method': 'x402' } }` gives an x402-paying provider without touching Flue. `setProvider(...)` in `app.ts` registers it; a model specifier `x402-ai-gateway/openai/gpt-oss-20b` resolves provider = text before the first slash.
+- Tools: `defineTool` with Valibot; `durable: true` gives `step.do(name, fn)` (exactly-once-recorded, so a payment is never repeated on Durable Object recovery). `usePersistentState` for a durable spend ledger. `useResponseFinish` can attach metadata (receipts) to the reply.
+- Cloudflare target: `'use agent'` files → Durable Object classes; `wrangler.jsonc` owns `new_sqlite_classes` migrations; `import { env } from 'cloudflare:workers'` for secrets; static assets with `run_worker_first` for agent routes; `vite dev` / `vite build` / `wrangler deploy`.
+- HTTP: `createAgentRouter(Agent)` → `POST /agents/<name>/:id` (202), `GET` same URL for a snapshot or `?view=updates&offset=...&live=sse` for a live stream.
 
-### Toolchain on this machine
-Node 26.2, npm 11.13, pnpm and bun present, no global wrangler (use `npx`). Repo contains only README, LICENSE, .gitignore.
+### Toolchain
+Node 26.2, **Bun** (chosen), no global wrangler (use `bunx`). Repo contains README, LICENSE, .gitignore, PLAN.md.
 
 ## 3. Architecture
 
 ```
 src/
-  app.ts                     Hono app; mounts the agent at /agents/joker; GET /health; GET /wallet (address + USDC balance)
-  agents/joker.ts            'use agent' — StockJoke: useModel (orchestrator), useTool x3, usePersistentState (spend ledger), instructions
-  tools/stocktwits.ts        fetch_stocktwits_signals  (durable; 1 paid call + 1 free call)
-  tools/ceramic.ts           search_stock_news         (durable; 1–2 paid calls)
-  tools/joke.ts              write_joke                (durable; 1 paid AI Gateway call)
-  lib/x402.ts                buildPaidFetch(): x402Client + ExactEvmScheme(viem account) + guarded signer + receipt decode
+  app.ts                     Hono app: setProvider(x402AiGatewayProvider), mount /agents/joker, GET /api/health, GET /api/wallet
+  agents/joker.ts            'use agent' — StockJoker: useModel('x402-ai-gateway/openai/gpt-oss-20b'), useTool x3,
+                             usePersistentState spend ledger, useResponseFinish receipts, ordered instructions
+  tools/stocktwits.ts        fetch_stocktwits_signals  (durable; 2 paid calls: trending + show)
+  tools/ceramic.ts           search_stock_news         (durable; 1 paid call)
+  tools/joke.ts              write_joke                (durable; 1 paid /ai/run call)
+  lib/x402.ts                buildPaidFetch(caps): x402Client + ExactEvmScheme(viem account) + budget-guarded signer + receipt decode
+  lib/ai-gateway-provider.ts pi-ai createProvider wrapping openAICompletionsApi() with the paid fetch + Payment-Method header
+                             (plus, if the spike says so, a chat-completions ⇄ /ai/run translating fetch)
   lib/budget.ts              per-call and per-conversation USDC caps (reserve / commit / release)
-  lib/env.ts                 typed access to secrets via cloudflare:workers env
+  lib/ledger.ts              in-isolate receipt ledger keyed by conversation id, read by useResponseFinish and the page
+  lib/env.ts                 typed secrets via cloudflare:workers env
+public/
+  index.html                 ticker box → POST to the agent → SSE stream renders joke, data, receipts (no framework, one file)
 scripts/
-  wallet-new.ts              generate a dedicated private key, print address, write .dev.vars (never overwrite an existing key)
-  doctor.ts                  check USDC balance on Base, fetch the 402 quotes from StockTwits + Ceramic + AI Gateway, verify CF token
-wrangler.jsonc / vite.config.ts / flue.config.ts / .dev.vars.example / PLAN.md / README.md
+  wallet-new.ts              generate a dedicated key, print address, write .dev.vars (never overwrite an existing key)
+  doctor.ts                  USDC balance on Base, decode the 402 quotes from StockTwits + Ceramic + AI Gateway, check CF token
+wrangler.jsonc / vite.config.ts / flue.config.ts / .dev.vars.example / bun.lock / README.md
 ```
 
-Design decisions baked in (flag if you disagree):
-- **Three tools, fixed order via the agent instructions.** Each is `durable: true`; every paid request lives inside `step.do(...)` so a Durable Object restart never double-pays. Tool outputs carry `{ data, paid: "0.001", tx: "0x…" }` so receipts bubble into the reply.
-- **Orchestrator model ≠ joke model.** Flue's provider layer cannot attach x402 payments, and AI Gateway machine payments only exist on the universal `/ai/run` endpoint. So the Flue agent runs on a keyless Workers AI model (`cloudflare/@cf/...`, billed to the Worker account, free tier) for routing/tool calls, and the *joke itself* is generated by a direct x402-paid `/ai/run` call inside `write_joke`. All three "content" steps are x402-paid; only the thin orchestration is not.
-- **One shared x402 client** built once per isolate from `EVM_PRIVATE_KEY` (`network: "eip155:8453"`, `maxAmountPerPayment: "$0.01"` for data, a separate higher cap for inference). A budget guard wraps `signTypedData` so an over-cap payment is refused *before* it is signed (Ceramic's pattern). Per-conversation total tracked in `usePersistentState`.
-- **Receipts are first-class.** Decode `PAYMENT-RESPONSE` (base64 JSON) → `https://basescan.org/tx/<hash>` in every tool output and in the final reply.
-- **Always trust the 402 quote**, never hardcoded `payTo`/`amount`; the caps are the only client-side constants.
+Design decisions:
+- **Everything the model does is x402-paid.** The orchestrator provider pays per turn through AI Gateway machine payments. Step 3 stays a separate `write_joke` tool so the joke call has its own prompt, model, cap and receipt.
+- **Three tools, fixed order via the instructions.** Each is `durable: true`; every paid request lives inside `step.do(...)`. Tool outputs carry `{ data, paid, tx }`.
+- **One x402 client, two spend caps.** Data calls capped at $0.01 per payment; inference calls capped separately (value set from what AI Gateway actually quotes in the spike). The guard wraps `signTypedData`, so an over-cap payment is refused before it is signed. Per-conversation total in `usePersistentState`.
+- **Receipts are first-class.** `PAYMENT-RESPONSE` decoded to `https://basescan.org/tx/<hash>` for tools and for orchestrator turns, shown in the reply and on the page.
+- **Trust the 402 quote**, never hardcoded `payTo` or `amount`; caps are the only client-side constants.
 
 ## 4. Implementation steps
 
-0. **Scaffold** — `npx @flue/cli init` into a scratch dir (repo is non-empty), move generated files in, merge `.gitignore` (add `.dev.vars`, `.flue-vite.wrangler.jsonc`, `dist/`). Install `@x402/core @x402/evm @x402/fetch viem valibot`. Rename hello agent → `StockJoke`, update `wrangler.jsonc` migration class name (`FlueStockJokeAgent`). Commit.
-1. **Wallet + doctor scripts** — `wallet-new` (viem `generatePrivateKey`), `doctor` (balance via `eth_call balanceOf` on `0x8335…2913`, decode the three 402 quotes, check `CLOUDFLARE_API_TOKEN` with `/ai/run` unpaid). Commit.
-2. **`lib/x402.ts` + `lib/budget.ts`** — paid fetch factory, guarded signer, receipt decoder (use `atob`, not `Buffer`, to stay Workers-friendly). Unit tests (vitest) for budget math and receipt decoding. Commit.
-3. **Step 1 tool: `fetch_stocktwits_signals(symbol)`** — paid `GET /api/2/symbols/trending/{SYM}.json`, free `GET /api/2/streams/symbol/{SYM}.json`; derive `{ title, exchange, sector, trendingSummary, latestPrice, priceRange, bullish, bearish, neutral, sentimentChange, volumeChange, topMessages[] (3 short bodies, stripped of HTML) }`. Handle 402-after-payment (decode `error`), 403 geo, 429. Commit.
-4. **Step 2 tool: `search_stock_news(query)`** — paid `POST https://api.ceramic.ai/search`; query built from `title + ticker + "news"`; return top 5 `{title,url,description}`. Commit.
-5. **Step 3 tool: `write_joke(context)`** — first pin the real `/ai/run` response shape with curl; then paid call with `Payment-Method: x402`, default model `z-ai/glm-4.7-flash`, tight prompt ("one joke, ≤ 60 words, reference at least one real datapoint, no financial advice"). Commit.
-6. **Agent wiring** — `useModel('cloudflare/@cf/<small instruct model>')`, mount tools, instructions enforce order 1→2→3 and the reply format (joke, then a 3-line "based on" block, then receipts and total spent). `usePersistentState` spend ledger with a per-conversation cap. Commit.
-7. **`app.ts` + wrangler** — mount `/agents/joker`, add `/health` and `/wallet`, `observability.enabled = true`. Commit.
-8. **Local e2e** — fund wallet with ~$1 USDC on Base, `npx vite dev`, `curl -X POST .../agents/joker/demo -d '{"kind":"user","body":"joke about AAPL"}'`, read with `GET`. Fix whatever the real responses break. Commit.
-9. **Deploy** — `wrangler secret put` ×3, `vite build`, `wrangler deploy`, smoke test on `*.workers.dev`. README: setup, funding, cost per joke, curl examples. Commit + push.
+Commit after each step; push at the end of each step.
+
+0. **Spike (needs account id + token in `.dev.vars`).** A Bun script that, with a funded wallet: (a) sends a paid `/ai/run` request to `openai/gpt-oss-20b` and records the response envelope; (b) repeats with `input.tools` to confirm tool calling; (c) tries `stream: true`; (d) tries `/ai/v1/chat/completions` with `Payment-Method: x402`. Outcome decides the provider shim: if (d) pays, the provider's `baseUrl` is `.../ai/v1` and no translation is needed; otherwise the paid fetch rewrites chat-completions requests into the `/ai/run` envelope and, if `/ai/run` does not stream, converts the completed result into a one-chunk SSE stream for the adapter. Record findings in PLAN.md section 2.
+1. **Scaffold.** `bunx @flue/cli init` into a scratch dir (repo is non-empty), move files in, merge `.gitignore` (`.dev.vars`, `.flue-vite.wrangler.jsonc`, `dist/`). `bun add @x402/core @x402/evm @x402/fetch viem valibot @earendil-works/pi-ai`. Rename hello agent → `StockJoker`, fix the `wrangler.jsonc` migration class (`FlueStockJokerAgent`).
+2. **Wallet + doctor scripts.**
+3. **`lib/x402.ts`, `lib/budget.ts`, `lib/ledger.ts`** with `bun test` coverage for budget math and receipt decoding. Use `atob`, not `Buffer`.
+4. **`lib/ai-gateway-provider.ts`** per the spike; register in `app.ts`; smoke-test one agent turn locally under `vite dev` and confirm a receipt.
+5. **Step 1 tool `fetch_stocktwits_signals(symbol)`**: paid `symbols/trending` + paid `symbols/show` → `{ title, exchange, sector, industry, trending, trendingSummary, watchlistCount, lastUpdated }`. Handle 402-after-payment (decode `error`), 403 geo, 429.
+6. **Step 2 tool `search_stock_news(query)`**: paid Ceramic search, query from title + ticker + "stock news", top 5 results.
+7. **Step 3 tool `write_joke(context)`**: paid `/ai/run` with `z-ai/glm-4.7-flash` (configurable), prompt: one joke ≤ 60 words, must reference a real datapoint, no financial advice.
+8. **Agent wiring**: instructions enforce 1→2→3 and the reply format (joke, "based on" block, receipts, total spent); spend ledger; `useResponseFinish` metadata with orchestrator receipts.
+9. **`public/index.html` + `app.ts` routes + wrangler assets** (`run_worker_first: ["/agents/*", "/api/*"]`), observability on.
+10. **Local e2e** with ~$1 USDC: `curl -X POST .../agents/joker/demo -d '{"kind":"user","body":"joke about AAPL"}'`, read with `GET`, then the page. Fix whatever real responses break.
+11. **Deploy**: `wrangler secret put` ×3, `bunx vite build`, `bunx wrangler deploy`, smoke test. README: setup, funding, cost per joke, curl examples.
 
 ## 5. Secrets and config
 
@@ -91,22 +105,23 @@ Design decisions baked in (flag if you disagree):
 |---|---|---|
 | `EVM_PRIVATE_KEY` | `.dev.vars` / `wrangler secret` | dedicated wallet, holds only a few USDC on Base |
 | `CLOUDFLARE_ACCOUNT_ID` | `.dev.vars` / `wrangler secret` | AI Gateway `/ai/run` URL |
-| `CLOUDFLARE_API_TOKEN` | `.dev.vars` / `wrangler secret` | required alongside `Payment-Method: x402` (Workers AI read scope) |
-| `MAX_USDC_PER_CALL` (default `0.01`), `MAX_USDC_PER_JOKE` (default `0.05`), `JOKE_MODEL` | `vars` in wrangler.jsonc | caps and model override |
+| `CLOUDFLARE_API_TOKEN` | `.dev.vars` / `wrangler secret` | required alongside `Payment-Method: x402` |
+| `MAX_USDC_PER_DATA_CALL` (`0.01`), `MAX_USDC_PER_INFERENCE` (from spike), `MAX_USDC_PER_JOKE` (`0.10`), `ORCHESTRATOR_MODEL`, `JOKE_MODEL` | `vars` in wrangler.jsonc | caps and model overrides |
 
-Expected cost per joke: 0.001 (trending) + 0.001–0.002 (search) + inference (sub-cent for a 60-word completion on glm-4.7-flash) ≈ **$0.003–0.01**.
+Expected cost per joke: 0.002 (StockTwits) + 0.001 (Ceramic) + 3–4 orchestrator turns + 1 joke call on sub-cent open models ≈ **$0.005–0.03**, dominated by inference.
 
-## 6. Open questions for you
+## 6. Review decisions (2026-10-15)
 
-1. **StockTwits data.** The x402 preview does not expose the sentiment/price-chart endpoints. Proposed source for "price movements and sentiment": paid `symbols/trending` (why-trending summary) + free `streams/symbol` (per-message bull/bear labels, post-time prices, sentiment/volume change). OK, or do you have Basic Auth StockTwits credentials you want wired in as an optional richer path?
-2. **Orchestrator model.** Keyless Workers AI (`cloudflare/@cf/...`) as proposed, or an Anthropic key (`anthropic/claude-haiku-4-5`) for more reliable tool-ordering?
-3. **AI Gateway machine payments eligibility.** Is your Cloudflare account US-based with a card on file, and do you have (or can you create) an API token? If not, fallback for Step 3 is a keyless Workers AI call (no x402) and the plan notes it.
-4. **Interface.** HTTP agent endpoints + curl examples only, or also a minimal static HTML page (ticker box → streamed joke) served from the same Worker?
-5. **Package manager.** npm by default (lockfile committed); say so if you prefer pnpm/bun.
+1. StockTwits source: **x402 paid endpoints only** (`symbols/trending`, `symbols/show`). No Basic Auth path, no free stream.
+2. Orchestrator model: **AI Gateway machine-payment models via x402**, through a custom pi-ai provider (section 2, Flue). Default `openai/gpt-oss-20b` for tool calling; spike may change it.
+3. AI Gateway eligibility: **confirmed, no fallbacks.**
+4. Interface: **both** HTTP agent endpoints and a static HTML page on the same Worker.
+5. Package manager: **Bun.**
 
 ## 7. Risks
 
-- `@x402/*` and `viem` inside workerd with `nodejs_compat`: expected to work (pure-JS crypto), verified in Step 2 before anything else depends on it.
-- StockTwits preview is staging, no SLA, geo-fenced; the Worker's egress country decides the 403, not yours. If it fails from Cloudflare's edge we will know in Step 8.
-- AI Gateway x402 authorizes a *maximum* per call; cap `max_tokens` (≈200) so the authorized amount stays small.
-- Durable Object retries + payments: covered by `step.do`; the one unavoidable window is a crash between settlement and recording, which would cost one extra 0.001 USDC, not a double joke.
+- **Provider shim is the critical path.** If `/ai/run` rejects `tools` for every eligible model, the orchestrator cannot call tools and the design must change (e.g. deterministic pipeline behind one durable tool). The spike settles this first, before any other code.
+- **Streaming.** pi-ai's adapter always streams; if `/ai/run` is non-streaming under x402 we synthesize SSE from the completed result. Latency is fine for a joke; correctness of usage/cost fields needs a check.
+- `@x402/*` and `viem` inside workerd with `nodejs_compat`: expected to work (pure-JS crypto), verified in step 3.
+- StockTwits preview: staging, no SLA, geo-fenced by the Worker's egress country, not yours. Known at step 10.
+- Durable Object retries and payments: covered by `step.do`; the orchestrator turns are not inside `step.do`, so an interrupted turn may be re-run and paid again. Flue only retries when it can prove the provider call did not complete, which bounds this to one extra turn.
