@@ -6,8 +6,7 @@ import { base } from 'viem/chains';
 import { Joke } from './agents/joke.ts';
 import { PRICE_USDC, checkAccess, paymentRequiredBody } from './lib/access.ts';
 import { createX402AiGatewayProvider } from './lib/ai-gateway-provider.ts';
-import { jokeStats, latestJokeFor, listJokes } from './lib/db.ts';
-import { handoff } from './lib/drafts.ts';
+import { jokeStats, latestJokeFor, listJokes, recordAccess } from './lib/db.ts';
 import { config, paidInferenceFetch } from './lib/env.ts';
 import { ledger } from './lib/ledger.ts';
 import { PERMIT2, USDC_BASE, walletFromKey } from './lib/x402.ts';
@@ -38,7 +37,8 @@ app.use('/agents/joke/:id', async (c, next) => {
 		}
 		return c.json({ error: 'unauthorized', message: access.reason }, 401);
 	}
-	handoff.setAccess(c.req.param('id'), access.by);
+	// The agent runs in a Durable Object (another isolate), so hand this over through D1.
+	await recordAccess(c.req.param('id'), access.by, access.amount).catch((err) => console.warn('recordAccess failed', (err as Error).message));
 	return next();
 });
 

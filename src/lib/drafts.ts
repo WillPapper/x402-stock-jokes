@@ -3,7 +3,6 @@
  * conversation id, so the finished joke can be stored in D1 with its payments.
  */
 const drafts = new Map<string, JokeDraft>();
-const access = new Map<string, 'password' | 'x402'>();
 const titles = new Map<string, string>();
 
 export interface JokeDraft {
@@ -19,12 +18,6 @@ export const handoff = {
 		const d = drafts.get(conversationId) ?? null;
 		drafts.delete(conversationId);
 		return d;
-	},
-	setAccess: (conversationId: string, by: 'password' | 'x402') => access.set(conversationId, by),
-	takeAccess: (conversationId: string) => {
-		const a = access.get(conversationId) ?? null;
-		access.delete(conversationId);
-		return a;
 	},
 	setTitle: (symbol: string, title: string) => titles.set(symbol.toUpperCase(), title),
 	title: (symbol: string) => titles.get(symbol.toUpperCase()) ?? null,

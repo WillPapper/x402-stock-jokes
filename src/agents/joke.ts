@@ -1,7 +1,7 @@
 'use agent';
 import { useAgentFinish, useAgentStart, useModel, useResponseFinish, useResponseStart, useTool } from '@flue/runtime';
 import { X402_PROVIDER_ID } from '../lib/ai-gateway-provider.ts';
-import { insertJoke } from '../lib/db.ts';
+import { accessFor, insertJoke } from '../lib/db.ts';
 import { handoff } from '../lib/drafts.ts';
 import { config } from '../lib/env.ts';
 import { ledger } from '../lib/ledger.ts';
@@ -51,7 +51,7 @@ export function Joke({ id }: { id: string }) {
 				totalAuthorizedUsdc: total,
 				orchestratorModel: config.orchestratorModel,
 				jokeModel: draft.model,
-				paidBy: handoff.takeAccess(id),
+				paidBy: (await accessFor(id).catch(() => null))?.paidBy ?? null,
 			});
 			log.info(`stored joke ${row.id} for ${row.ticker} (${payments.length} payments, ${total} USDC authorized)`);
 		} catch (err) {

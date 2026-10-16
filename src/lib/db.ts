@@ -103,3 +103,16 @@ export async function jokeStats(): Promise<JokeStats> {
 		latestAt: totals?.latest ?? null,
 	};
 }
+
+export async function recordAccess(conversationId: string, paidBy: 'password' | 'x402', amountBaseUnits?: string): Promise<void> {
+	const amount = amountBaseUnits ? (Number(amountBaseUnits) / 1e6).toFixed(6) : null;
+	await db()
+		.prepare('INSERT INTO access (conversation_id, paid_by, amount_usdc, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(conversation_id) DO UPDATE SET paid_by = excluded.paid_by, amount_usdc = excluded.amount_usdc')
+		.bind(conversationId, paidBy, amount, new Date().toISOString())
+		.run();
+}
+
+export async function accessFor(conversationId: string): Promise<{ paidBy: 'password' | 'x402'; amountUsdc: string | null } | null> {
+	const r = await db().prepare('SELECT paid_by, amount_usdc FROM access WHERE conversation_id = ?1').bind(conversationId).first<{ paid_by: string; amount_usdc: string | null }>();
+	return r ? { paidBy: r.paid_by as 'password' | 'x402', amountUsdc: r.amount_usdc } : null;
+}

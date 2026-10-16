@@ -50,14 +50,15 @@ A `POST /agents/joke/:id` spends real money, so it needs one of:
 
 Neither present: the Worker answers `402` with instructions and the latest cached joke for that ticker, so curious visitors still get a laugh without paying. Reading a conversation (`GET`), the feed and the stats are always free.
 
-Gateway rule on the `papper.me` zone (set in the dashboard; the API equivalent is a Wirefilter expression):
+Gateway rule on the `papper.me` zone (dashboard, or `cf monetization rules update`; the API form is a Wirefilter expression):
 
 ```
-http.host eq "jokes.papper.me" and http.request.method eq "POST"
-  and starts_with(http.request.uri.path, "/agents/joke/")
-  and not any(http.request.headers["x-joke-password"][*] eq "<password>")
+http.host eq "jokes.papper.me" and starts_with(http.request.uri.path, "/agents/joke/")
+  and http.request.method eq "POST" and not len(http.request.headers["x-joke-password"]) > 0
 ```
-Fixed price `$0.10` (`exact`), audience Everyone, receiving wallet = the app wallet, so revenue tops up what the app spends.
+Fixed price `$0.10` (`exact`), audience Everyone, receiving wallet = the app wallet, so revenue tops up what the app spends. The rule charges whenever the header is *absent*; the Worker checks the header's *value*, so a wrong password is a 401, not a free ride.
+
+Verified 2026-10-16: an unpaid POST gets the gateway's 402 with a 0.10 USDC quote; `bun scripts/pay-for-joke.ts TSLA` from a second wallet paid it ([tx](https://basescan.org/tx/0x140f1cc2580e8a7771d6e55e5cd248715bc7ade6142549174c775df32634725c)), the Worker accepted the signed `PAYMENT-CONTEXT`, and the joke was stored with `paidBy: "x402"`. Paying from the app's own wallet is refused by the facilitator ("facilitator rejected verify request"), so use a different wallet to test.
 
 ## The page
 
@@ -110,7 +111,7 @@ curl http://localhost:5173/api/stats                    # count, tickers, USDC a
 curl http://localhost:5173/api/wallet                   # address, USDC balance, Permit2 status
 ```
 
-Conversations are durable: reuse the same id to keep talking. Paying from a script instead of the password:
+Conversations are durable: reuse the same id to keep talking. `bun scripts/pay-for-joke.ts NVDA` pays the app from `BUYER_PRIVATE_KEY` (or the app wallet) and prints the joke; the core of it:
 
 ```ts
 import { x402Client } from "@x402/core/client";
@@ -145,11 +146,11 @@ src/tools/joke.ts              step 3 (paid /ai/run → the joke)
 src/lib/x402.ts                one x402 client (exact + upto), budget-guarded signer, receipt decoding
 src/lib/ai-gateway-provider.ts the agent's model, paid with x402 through AI Gateway
 src/lib/access.ts              password or Monetization Gateway PAYMENT-CONTEXT check
-src/lib/db.ts                  D1: insert, feed, per-ticker latest, stats
+src/lib/db.ts                  D1: jokes (insert, feed, per-ticker latest, stats) and access (how each conversation was admitted)
 src/lib/budget.ts, ledger.ts   spend caps, payment records
 public/index.html              the page
 migrations/                    D1 schema
-scripts/                       wallet:new, approve, doctor
+scripts/                       wallet:new, approve, doctor, pay-for-joke
 ```
 
 Models: the orchestrator is `alibaba/qwen3.8-27b` (best multi-step tool use of the four machine-payment models) and the joke writer is `google/gemma-4-26b-a4b-it` (top of the four on creative-writing benchmarks). Both are thinking models; the joke call turns thinking off via `chat_template_kwargs.enable_thinking=false`, and the orchestrator keeps it on with a 2,048-token budget. Change either in `wrangler.jsonc` vars.
@@ -165,6 +166,8 @@ Cost per joke: about 0.002 USDC for data plus a few thousandths of a USDC settle
 - **Reply format drift.** The orchestrator sometimes writes `Based:` instead of `Based on:`; the page accepts both. The D1 row uses the facts passed to `write_joke`, not the reply text.
 - **`cf workers secrets bulk` did not set secrets** in this session (it reported success, then `secrets list` was empty); see [docs/cf-secrets-bulk-bug.md](./docs/cf-secrets-bulk-bug.md). `wrangler secret bulk` works.
 - **Only `write_joke` may produce the joke.** The agent is told it cannot write jokes itself and may call a tool at most twice per reply; an earlier version retried a failing joke call seven times.
+- **Only one hostname.** Adding the custom domain turned off the `workers.dev` route (requests there get Cloudflare error 1042). Everything, including the password path, goes through `jokes.papper.me`.
+- **Admission is recorded in D1**, not in memory: the HTTP gate and the agent's Durable Object are different isolates, so `access` rows carry `paid_by` across.
 - **Renaming the agent** renames its Durable Object class; `wrangler.jsonc` carries a `renamed_classes` migration (`FlueStockJokeAgent` → `FlueJokeAgent`) so existing conversations survive.
 
 ## Caveats
