@@ -15,8 +15,8 @@
   h1 { font-size:28px; margin:0 0 4px; letter-spacing:-0.01em }
   h2 { font-size:17px; margin:28px 0 10px }
   .sub { color:var(--muted); margin:0 0 22px }
-  form { display:grid; grid-template-columns:1fr auto; gap:8px; margin-bottom:20px }
-  .pwrow { display:grid; grid-template-columns:1fr auto; gap:8px; margin-top:8px }
+  form { display:grid; grid-template-columns:1.2fr 1fr auto; gap:8px; margin-bottom:20px }
+  @media (max-width:560px) { form { grid-template-columns:1fr } }
   input { font:inherit; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); min-width:0 }
   input#ticker { text-transform:uppercase }
   button { font:inherit; font-weight:600; padding:12px 18px; border:0; border-radius:10px; background:var(--accent); color:var(--accent-fg); cursor:pointer }
@@ -78,8 +78,10 @@
 
   <form id="form">
     <input id="ticker" placeholder="Ticker, e.g. NVDA" maxlength="12" autocomplete="off" required>
+    <input id="password" type="text" placeholder="Coupon code (optional)" autocomplete="off" autocapitalize="none" spellcheck="false">
     <button id="go" type="submit">Tell me a joke</button>
   </form>
+  <p class="step-detail" style="margin:-10px 0 18px">The coupon code is optional. Without one you'll get instructions for your agent to pay 0.10 USDC with x402 instead.</p>
 
   <section class="card" id="run">
     <ol class="steps" id="steps">
@@ -107,11 +109,8 @@
     <div class="actions"><button type="button" id="copy-pay">Copy instructions for my agent</button> <a class="linkbtn" href="/agent.md" target="_blank" rel="noopener">Open agent.md</a> <span class="step-detail" id="copied"></span></div>
     <details><summary class="step-detail">Minimal TypeScript</summary><pre id="paycurl"></pre></details>
     <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
-    <div class="step-title">Or use a coupon code for a free joke</div>
-    <form class="pwrow" id="pwform">
-      <input id="password" type="text" placeholder="Coupon code" autocomplete="off" autocapitalize="none" spellcheck="false">
-      <button type="submit" id="usepw">Use coupon</button>
-    </form>
+    <div class="step-title">Have a coupon code?</div>
+    <p class="step-detail" style="margin:4px 0 0">Enter it next to the ticker above and press "Tell me a joke" again; the joke is free.</p>
     <p class="err hidden" id="pwerr" style="margin:8px 0 0"></p>
     <div id="cachedwrap" class="hidden">
       <p class="muted" style="margin:14px 0 4px">Meanwhile, the latest cached joke for <span id="cachedticker"></span>:</p>
@@ -137,6 +136,7 @@
   const $ = (s) => document.querySelector(s);
   const form = $('#form'), ticker = $('#ticker'), password = $('#password'), go = $('#go');
   const savedPassword = () => { try { return localStorage.getItem('joke-password') || ''; } catch { return ''; } };
+  try { password.value = savedPassword(); } catch {}
   const savePassword = (v) => { try { if (v) localStorage.setItem('joke-password', v); else localStorage.removeItem('joke-password'); } catch {} };
   const dots = Object.fromEntries([...document.querySelectorAll('.dot')].map((d) => [d.dataset.step, d]));
   const money = (x) => Number(x || 0).toFixed(4);
@@ -287,6 +287,7 @@
     $('#paywall').classList.remove('hidden');
     setStep('started', 'error', pwError ? 'Not started: wrong coupon code.' : 'Not started: pay 0.10 USDC or use a coupon code.');
     if (pwError) password.focus();
+    else password.focus();
   }
 
   async function submit(sym, pw) {
@@ -299,7 +300,7 @@
       const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ kind: 'user', body: `Tell me a joke about ${sym}.` }) });
       if (res.status === 402 || res.status === 401) {
         let body = {}; try { body = await res.json(); } catch {}
-        if (res.status === 401) savePassword('');
+        if (res.status === 401) { savePassword(''); password.value = ''; }
         if (!body.cached) { try { body.cached = (await (await fetch(`/api/jokes/latest?ticker=${sym}`)).json()).joke; } catch {} }
         showPaywall(body, sym, res.status === 401 ? (body.message || 'Wrong coupon code.') : null);
         go.disabled = false; return;
@@ -334,13 +335,7 @@
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const sym = ticker.value.trim().toUpperCase(); if (!sym) return;
-    submit(sym, savedPassword());          // a remembered password skips the paywall; otherwise the 402 card appears
-  });
-  $('#pwform').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const sym = ticker.value.trim().toUpperCase(); const pw = password.value.trim();
-    if (!sym || !pw) return;
-    submit(sym, pw);
+    submit(sym, password.value.trim());    // no coupon: the 402 card with agent instructions appears
   });
 
   // ---- live feed ----
@@ -388,7 +383,7 @@
         const by = s.chain.paidBySeller || {};
         $('#s-paid-detail').textContent = '· ' + Object.keys(by).map((k) => `${k} ${by[k].toFixed(4)}`).join(' · ') + ` · ${s.chain.paidCount} transfers`;
       } else { $('#s-paid').textContent = '–'; $('#s-paid-detail').textContent = '(chain data unavailable)'; }
-      $('#s-earned').textContent = s.chain ? `${s.chain.earnedUsdc.toFixed(2)} (${s.chain.earnedCount} jokes)` : `${Number(s.earnedFromJokesUsdc).toFixed(2)}`;
+      $('#s-earned').textContent = s.chain ? s.chain.earnedUsdc.toFixed(2) : Number(s.earnedFromJokesUsdc).toFixed(2);
       sparkline(s.perHour);
     } catch {}
   }
