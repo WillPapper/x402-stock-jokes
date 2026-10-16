@@ -1,0 +1,8 @@
+# Local secrets for `vite dev` and the scripts in scripts/. Not committed.
+# Production: `wrangler secret put <NAME>` for each of the four below.
+CLOUDFLARE_ACCOUNT_ID=
+CLOUDFLARE_API_TOKEN=          # Account > Workers AI > Read (+ AI Gateway > Run)
+EVM_BASE_ADDRESS=              # bun run wallet:new fills these two
+EVM_BASE_PRIVATE_KEY=
+# Optional
+# BASE_RPC_URL=https://mainnet.base.org

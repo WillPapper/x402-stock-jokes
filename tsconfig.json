@@ -16,6 +16,8 @@
 		"noEmit": true
 	},
 	"include": [
-		"src"
+		"src",
+		"scripts",
+		"worker-configuration.d.ts"
 	]
 }

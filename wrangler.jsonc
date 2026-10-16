@@ -11,6 +11,15 @@
 	// in local dev (`npx wrangler login` first):
 	// https://flueframework.com/docs/guide/models/#cloudflare-workers-ai-cloudflare-only
 	"ai": { "binding": "AI" },
+	// Non-secret knobs. Secrets (account id, API token, wallet key) live in
+	// .dev.vars locally and `wrangler secret put` in production.
+	"vars": {
+		"ORCHESTRATOR_MODEL": "openai/gpt-oss-20b",
+		"JOKE_MODEL": "z-ai/glm-4.7-flash",
+		"MAX_USDC_PER_DATA_CALL": "0.01",
+		"MAX_USDC_PER_INFERENCE": "0.10",
+		"MAX_USDC_PER_ISOLATE": "5"
+	},
 	// Every agent generates a Durable Object class named after its identity
 	// (StockJoke -> FlueStockJokeAgent), and Cloudflare requires a migration
 	// entry for each one. Append a new tag when you add an agent:
