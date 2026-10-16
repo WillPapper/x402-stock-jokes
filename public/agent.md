@@ -87,11 +87,10 @@ for (;;) {
 }
 ```
 
-The lower-level conversation API also works: `POST https://jokes.papper.me/agents/joke/<any-id>`
-with body `{"kind":"user","body":"Tell me a joke about NVDA."}` (same price). **Poll
-`https://jokes.papper.me/joke/<any-id>` for status, not the conversation URL:** reading the
-conversation while the joke is being made, from outside the US, makes its next payment fail
-(a Cloudflare gateway quirk). The full conversation JSON is safe to read once `done` is true.
+The lower-level submit also works: `POST https://jokes.papper.me/agents/joke/<any-id>`
+with body `{"kind":"user","body":"Tell me a joke about NVDA."}` (same price), then poll
+`https://jokes.papper.me/joke/<any-id>`. Conversation reads (`GET /agents/joke/…`) are not
+public; `/joke/<id>` has everything: status, each step's full output, payments, the joke.
 
 ## Free, no payment
 

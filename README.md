@@ -224,7 +224,7 @@ Monetization Gateway and AI Gateway machine payments are US-only, and they evalu
 
 1. The entry Worker (any colo, any visitor) only checks the coupon or the gateway's payment and **queues** the message into `JokeRunner`, a Durable Object in the `us` jurisdiction (`src/cloudflare.ts`).
 2. The runner's **alarm**, which has no originating request, dispatches the agent 3 s later. The agent's Durable Object is placed next to the runner (ORD so far) and every paid call leaves from there with no visitor attached.
-3. **Nothing reads the agent's object while it works.** Tools and the agent log progress to D1 (`events`), the finished joke goes to D1 (`jokes`), and `GET /joke/<id>` is served from D1. Reading `GET /agents/joke/<id>` from outside the US during a run would make its next payment fail; it's fine afterwards.
+3. **Nothing reads the agent's object.** Tools and the agent log progress to D1 (`events`), the finished joke goes to D1 (`jokes`), and `GET /joke/<id>` is served from D1. Conversation reads (`GET /agents/joke/<id>`, streams) answer 403 to everyone; abort needs the coupon header.
 
 Verified with a Canadian VPN: submit, poll every 2 s, full run, all payments 200. The `gate` events record visitor country, runner and agent colo for every run. Full write-up and bug report: [docs/ai-gateway-visitor-country.md](./docs/ai-gateway-visitor-country.md).
 
@@ -286,14 +286,14 @@ curl -X POST http://localhost:5173/agents/joke/demo-1 \
   -H 'content-type: application/json' -H 'x-joke-password: <JOKE_PASSWORD>' \
   -d '{"kind":"user","body":"Tell me a joke about NVDA."}'
 
-curl http://localhost:5173/agents/joke/demo-1           # snapshot: tool calls, reply, payments in metadata
+curl http://localhost:5173/joke/demo-1                  # status from D1: steps with outputs, payments, joke
 curl http://localhost:5173/api/jokes?limit=10           # feed, newest first (add &after=<iso> for updates)
 curl 'http://localhost:5173/api/jokes/latest?ticker=NVDA'
 curl http://localhost:5173/api/stats                    # count, tickers, USDC authorized, per-hour buckets
 curl http://localhost:5173/api/wallet                   # address, USDC balance, Permit2 status
 ```
 
-Conversations are durable: reuse the same id to keep talking. `bun scripts/pay-for-joke.ts NVDA` pays the app from `BUYER_PRIVATE_KEY` (or the app wallet) and prints the joke; the core of it:
+Conversation reads are not public (they would lend the reader's location to in-flight payments); `/joke/<id>` is the status API. `bun scripts/pay-for-joke.ts NVDA` pays the app from `BUYER_PRIVATE_KEY` (or the app wallet) and prints the joke; the core of it:
 
 ```ts
 import { x402Client } from "@x402/core/client";

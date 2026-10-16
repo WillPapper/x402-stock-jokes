@@ -28,9 +28,22 @@ const app = new Hono();
 
 // Submitting a message costs money (every step pays with x402), so a POST needs
 // either the password or a Monetization Gateway payment. Reads stay free.
+// Reads are public but must never reach the agent's Durable Object while it is
+// paying: a read lends the reader's visitor identity to in-flight payments (see
+// docs/ai-gateway-visitor-country.md). While a run is in progress, the
+// conversation URL (and its stream/attachment subpaths) answer with the D1-built
+// status; once done they serve the real conversation. Abort is internal-only.
+app.post('/agents/joke/:id/abort', (c) => c.json({ error: 'not_public', message: 'abort is internal' }, 403));
+app.use('/agents/joke/:id/:rest{.+}', async (c, next) => {
+	const st = await statusFromDb(c.req.param('id'));
+	return st.done ? next() : c.json({ ...st, note: 'This conversation is still being made; the full conversation is served here once done.' });
+});
 app.use('/agents/joke/:id', async (c, next) => {
-	if (c.req.method !== 'POST') return next();
 	const id = c.req.param('id');
+	if (c.req.method !== 'POST') {
+		const st = await statusFromDb(id);
+		return st.done ? next() : c.json({ ...st, note: 'This conversation is still being made; the full conversation is served here once done.' });
+	}
 	const access = await checkAccess(c.req.raw, id);
 	if (!access.ok) {
 		if (access.status === 402) {
@@ -56,7 +69,7 @@ app.use('/agents/joke/:id', async (c, next) => {
 	const us = config.runner.jurisdiction('us');
 	const runner = us.get(us.idFromName('us-runner'), { locationHint: config.runnerLocationHint });
 	const queued = await (runner as unknown as { submit(req: { id: string; body: string; by: 'password' | 'x402' }): Promise<{ queued: true; jurisdiction: string | undefined }> }).submit({ id, body: message.body, by: access.by });
-	return c.json({ streamUrl: new URL(c.req.url).origin + `/agents/joke/${id}`, queued: queued.queued, runner: { jurisdiction: queued.jurisdiction, startsFrom: 'alarm' } }, 202);
+	return c.json({ statusUrl: new URL(c.req.url).origin + `/joke/${id}`, queued: queued.queued, runner: { jurisdiction: queued.jurisdiction, startsFrom: 'alarm' } }, 202);
 });
 
 // Talk to Joke with one POST per message, then GET the same URL to read:

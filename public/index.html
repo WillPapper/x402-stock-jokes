@@ -314,7 +314,7 @@
       if (e.target.closest('a')) return;
       let data = key === 'turns' ? runPayments.filter((p) => p.label.includes('orchestrator')) : runOutputs[name];
       if (!data || (Array.isArray(data) && !data.length)) data = { note: key === 'turns' ? 'Model turns are tallied when the agent finishes.' : 'This step has not returned yet.' };
-      const links = runId ? `<a href="/agents/joke/${runId}" target="_blank" rel="noopener">conversation JSON</a> · <a href="/api/events?conversation=${runId}" target="_blank" rel="noopener">x402 gateway events</a>` : '';
+      const links = runId ? `<a href="/joke/${runId}" target="_blank" rel="noopener">run status JSON</a> · <a href="/api/events?conversation=${runId}" target="_blank" rel="noopener">x402 gateway events</a>` : '';
       toggleHood(li, key, data, links, null);
     });
   });
@@ -347,7 +347,7 @@
       const key = b.dataset.k;
       const fallback = { note: 'The full response for this step was not archived (jokes made before 2026-10-16 20:10 UTC only kept their payments and facts).', facts: j.facts || [], payment: key === 'stocktwits' ? st : key === 'ceramic' ? ce : jk };
       const data = key === 'turns' ? (turns.length ? turns : { note: 'No per-turn records for this joke.' }) : (steps[key] || fallback);
-      const links = `<a href="/agents/joke/${encodeURIComponent(j.conversationId)}" target="_blank" rel="noopener">conversation JSON</a> · <a href="/api/events?conversation=${encodeURIComponent(j.conversationId)}" target="_blank" rel="noopener">x402 gateway events</a>`;
+      const links = `<a href="/joke/${encodeURIComponent(j.conversationId)}" target="_blank" rel="noopener">run status JSON</a> · <a href="/api/events?conversation=${encodeURIComponent(j.conversationId)}" target="_blank" rel="noopener">x402 gateway events</a>`;
       toggleHood(el, key, data, links, b);
     }));
     return el;
