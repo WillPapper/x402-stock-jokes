@@ -1,49 +1,53 @@
-# Bug report: Monetization Gateway / AI Gateway machine payments (x402) apply the *visitor's* country to payments made by a Worker, so a US seller's app fails for non-US visitors
+# Machine Payments and Monetization Gateway: buyer eligibility is checked against the end user's country, not the paying account, for requests made from Workers
 
-**Product:** AI Gateway Machine Payments (x402) on `POST /accounts/{id}/ai/run`, and Monetization Gateway sellers (StockTwits, Ceramic) paid with x402 from a Worker. Same behavior on both.
-**Observed:** 2026-10-16, account `f14cbf01…` (US, Monetization Gateway active), Worker `x402-stock-jokes` at https://jokes.papper.me
-**Reporter context:** the payer is the app's own US-based account and wallet; the end user never pays AI Gateway and never sees it.
+**Products:** AI Gateway [Machine Payments (x402)](https://developers.cloudflare.com/ai-gateway/features/machine-payments/) on `POST /accounts/{account_id}/ai/run`; [Monetization Gateway](https://developers.cloudflare.com/monetization-gateway/) sellers paid with x402 from a Worker (same behavior).
+**Reporter:** US account `f14cbf01…` with Machine Payments and Monetization Gateway enabled, paying from its own wallet. Observed 2026-10-16.
 
 ## Summary
 
-A Cloudflare Worker (and its Durable Objects) pays StockTwits, Ceramic and AI Gateway with x402 from the account owner's US wallet. The buyer-eligibility check ("US-based") is evaluated against the **country of the end user whose HTTP request is in flight when the Worker makes the paid subrequest**, not against the account, the wallet, or even the datacenter running the code. Cloudflare propagates the visitor's identity down the whole synchronous request chain (Worker → Durable Object → Durable Object, across regions), and a Durable Object attributes its outbound requests to whichever incoming request is active at that moment. So:
+When a Worker or Durable Object pays an x402 challenge, the "US-based buyer" requirement is evaluated against the country of the **end user whose request is in flight** at the time of the subrequest, not against the account that holds the API token and signs the payment. A US account's Worker therefore gets `403 {"error":"forbidden","message":"disallowed visitor country"}` whenever the person using the app is outside the US, even though that person is not the buyer and never sees the gateway.
 
-- a non-US visitor who *submits* a joke makes every payment fail with `403 {"error":"forbidden","message":"disallowed visitor country"}` (and `503 … facilitator verify returned 403` when it hits at verify time), even when the Durable Object runs in ORD inside the `us` jurisdiction;
-- a non-US visitor who merely *polls the status* of someone else's run, if that read reaches the agent's Durable Object, makes that run's payments fail from that moment on.
+## Expected vs. actual
 
-The app owner cannot see this at deploy time, and the only fix is to re-architect so that no eyeball request ever touches the object that pays (details below). The buyer in these flows is the account and its wallet; the visitor never pays anything.
+The Machine Payments docs say the account must be US-based with a card on file and that the request carries the account's token in `Authorization`. The buyer is the account (its token, its wallet). Expected: eligibility follows the account. Actual: eligibility follows the visitor of the Worker.
 
-## Evidence (all 2026-10-16 UTC, account `f14cbf01…`, Worker `x402-stock-jokes` on jokes.papper.me; every run has full event logs at `GET https://jokes.papper.me/api/events?conversation=<id>`)
+## Reproduction (no application code needed)
 
-1. **Identical runs, different outcomes by visitor.** From US visitors: dozens of successful runs. From a visitor in Portugal (`web-fe0c59f3`, 20:21Z, Worker colo LIS) and Canada (`web-b7184322`, 20:26Z, colo YYZ): first paid StockTwits call `403 disallowed visitor country`, next AI Gateway call `403`, run dead.
-2. **Location pinning does not help.** The conversation was started from a Durable Object in the `us` jurisdiction (`JokeRunner`, ORD) via a direct RPC from the Worker. The runner's own `cdn-cgi/trace` subrequest, executed in ORD, reported `loc=PT` / `loc=CA` for those runs: the visitor's identity rides along the request chain into the US object. Payments failed with rays `a4b9c5851e9e1401-ORD`, `a4b9cd1b39b213cb-ORD`.
-3. **An alarm breaks the chain for the start, but reads re-attach it.** Starting the agent from the runner's *alarm* (no originating request) made the runner report `loc=US`. A Canadian-visitor run with **no reads at all** during execution (`nopoll-2`, 20:37Z) then succeeded end to end (StockTwits, Ceramic, AI Gateway all 200 from ORD). The same setup **with** the visitor polling the conversation (`j-crm-mvbfgj9z-b78p`, 20:36Z: first AI Gateway turn 200, then StockTwits 403, then AI Gateway 403 at the moment of the next poll) failed.
-4. **Serving status from D1 instead of the Durable Object fixes it.** With reads never reaching the agent object, a Canadian visitor polling every 2 s completed a full run (`j-snow-mvbfqw28-1icf`, 20:41Z: 4 model turns, 7 payments, all 200).
-5. **The 503 is the same check.** `503 {"error":"service_unavailable","message":"facilitator verify returned 403"}` appeared only in runs touched by a non-US visitor (e.g. `nopoll-1` first turn, `web-9a5d6965`); a burst of 14 paid calls from a US laptop returned 14×200.
+1. A US account with Machine Payments enabled, a wallet funded with USDC on Base, Permit2 approved for the wallet.
+2. Deploy a Worker whose `fetch` handler does an **unpaid** `POST https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/ai/run` with headers `Authorization: Bearer $TOKEN`, `Payment-Method: x402` and a small chat body, and returns the upstream status and body. No wallet needed for this step: the first request is only meant to receive the 402 quote.
+3. Call the Worker from a US network: upstream answers `402` with a `PAYMENT-REQUIRED` quote. Call the same Worker through a non-US exit (a VPN set to Canada or Portugal): upstream answers `403 disallowed visitor country`.
+4. Same two calls against a Monetization Gateway seller endpoint (any seller, e.g. the StockTwits x402 preview `GET https://api-staging-mgw.stocktwits.com/api/2/symbols/show/AAPL.json`): `402` from the US, `403` from the non-US exit.
 
-## The workaround we had to build
+The Worker's subrequest does not carry the visitor's IP (a request to `https://www.cloudflare.com/cdn-cgi/trace` from the Worker shows a Cloudflare egress address), but it carries the visitor's country: the same trace shows `loc=CA` for the Canadian caller even when it runs in a US datacenter.
 
-1. The public Worker only authenticates and **queues** the message into a Durable Object in the `us` jurisdiction (`JokeRunner.submit` → storage + `setAlarm(now + 3 s)`).
-2. The runner's `alarm()` dispatches the agent. The alarm has no originating request, so the agent's Durable Object (placed next to the runner, in the US) pays with no visitor identity attached.
-3. **No eyeball request ever reaches the agent object while it works:** progress and results are written to D1 (`events`, `jokes` tables) and status is served from D1 (`GET /joke/<id>`). The raw conversation read (`GET /agents/joke/<id>`) is documented as "do not call while a joke is being made".
+Extending the repro to Durable Objects shows the same identity propagating further than expected:
 
-## Why this is a bug (or at least a gap)
+5. Have the Worker call a Durable Object created in the `us` jurisdiction ([Data location](https://developers.cloudflare.com/durable-objects/reference/data-location/)) that performs steps 2–4. From the non-US client it still gets `403` and `loc=CA`, while running in ORD.
+6. Have that object perform the same subrequests from its [alarm handler](https://developers.cloudflare.com/durable-objects/api/alarms/) instead. With no client request in flight it gets `402` and `loc=US`.
+7. While the alarm's work is in progress, send any request from the non-US client to the same object (for example a read of its state). The object's next paid subrequest gets `403` again: the object attributes its outbound requests to whichever client request is active at that moment.
 
-- The buyer in a machine-payment flow from a Worker is the **account** (its token in `Authorization`, its wallet signing the authorization), not the person whose HTTP request happened to be in flight. Keying eligibility on the propagated visitor identity ties a US seller's product to its *users'* geography, and to the geography of anyone who merely reads a status page.
-- The propagation is invisible: the subrequest shows a Cloudflare egress IP (`2a06:98c0:3600::103`), `request.cf` in the Durable Object says nothing, and the only hint is `cdn-cgi/trace` reporting the visitor's `loc` from a US datacenter.
-- Developers get no signal at deploy time. The failure is intermittent by visitor, looks like a facilitator outage (`503 … verify returned 403`), and the fix requires an alarm-driven Durable Object plus moving all reads off the object, none of which is documented.
+## Identifiers from our runs (for correlation)
 
-## Suggested resolutions
+| Time (UTC) | Client exit | Result | cf-ray |
+|---|---|---|---|
+| 20:21:43 | Portugal (LIS) | `403 disallowed visitor country`, Durable Object in ORD | `a4b9c5851e9e1401-ORD` |
+| 20:26:54 | Canada (YYZ) | same | `a4b9cd1b39b213cb-ORD` |
+| 20:29:22 | Canada (YYZ) | same | `a4b9d0b76d66873b-ORD` |
+| 19:47 | US laptop | 14 consecutive paid `/ai/run` calls, all `200` | — |
+| 20:37–20:39 | Canada, work started from an alarm, no client requests during the run | all payments `200` from ORD | — |
 
-1. For `Authorization: Bearer <account token>` + `Payment-Method: x402` (AI Gateway), evaluate eligibility on the **account** (already required to be US-based with a card on file) and/or the **payer wallet**, not on the propagated visitor identity.
-2. For Monetization Gateway sellers paid from a Worker, let the buyer assert itself: treat requests originating from Workers/Durable Objects of an eligible account as that account, or honor a documented header/flag that names the Worker's account as the buyer.
-3. At minimum, document the propagation behavior and the alarm + "no reads on the paying object" workaround on the Machine Payments and Monetization Gateway pages, and return a distinct error (not `503 facilitator verify returned 403`) when the geo check fails during verify.
+The verify-time variant of the same check appears as `503 {"error":"service_unavailable","message":"facilitator verify returned 403"}`; it occurred only in runs touched by a non-US client.
 
-## Minimal reproduction
+## Why this matters
 
-1. A US account with Machine Payments enabled, a funded wallet with Permit2 approved.
-2. Deploy a Worker whose `fetch` handler does an unpaid `POST …/ai/run` with `Payment-Method: x402` and returns the status together with the `loc` from a subrequest to `https://www.cloudflare.com/cdn-cgi/trace`.
-3. Call it from a US network: `402` and `loc=US`. Call it through a non-US exit (VPN): `403 disallowed visitor country` and `loc=<that country>`, even though the subrequest IP is Cloudflare's.
-4. To show the Durable Object part: have the Worker call a `us`-jurisdiction Durable Object that makes the same two subrequests. From the non-US exit it still reports the visitor's `loc` and gets `403`; from the object's `alarm()` it reports `US` and gets `402`; have the non-US client poll the object during the alarm's work and the next paid call fails again.
+- In an agent or server-side integration the buyer is the account. Tying eligibility to the visitor means a US seller's product only works for US users, and for non-US users it fails with an error that looks like a facilitator outage.
+- The behavior is undocumented. Neither the Machine Payments page nor the Monetization Gateway [eligibility](https://developers.cloudflare.com/monetization-gateway/eligibility/) and [x402](https://developers.cloudflare.com/monetization-gateway/x402/) pages mention that the visitor's country is used for Worker-originated payments, nor that it propagates into Durable Objects in any jurisdiction.
+- The only working configuration we found is to do all paid work from a Durable Object alarm and to keep client requests away from that object until it is finished. That is a lot to discover from a `403`.
 
-Reference implementation and logs: https://github.com/WillPapper/x402-stock-jokes (`src/cloudflare.ts` JokeRunner, `src/lib/log.ts`, `GET /api/events`).
+## Requests
+
+1. For `Authorization: Bearer <account token>` + `Payment-Method: x402`, evaluate eligibility on the account and/or the payer wallet.
+2. For Monetization Gateway payments originating from Workers or Durable Objects of an eligible account, treat the account as the buyer, or provide a documented way for the Worker to assert it.
+3. Until then, document the current behavior on both product pages, including the alarm pattern, and return a distinct error instead of `503 facilitator verify returned 403` when the country check fails at verify time.
+
+Reference implementation with full per-request logs (cf-ray, cf-aig ids, quote JWT claims, payer, timestamps): https://github.com/WillPapper/x402-stock-jokes, `GET https://jokes.papper.me/api/events?conversation=<id>`.
