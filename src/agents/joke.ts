@@ -20,8 +20,8 @@ export function Joke({ id }: { id: string }) {
 	// machine payments (see src/lib/ai-gateway-provider.ts, registered in app.ts).
 	useModel(`${X402_PROVIDER_ID}/${config.orchestratorModel}`);
 
-	useTool(fetchStocktwitsSignals);
-	useTool(searchStockNews);
+	useTool(fetchStocktwitsSignals(id));
+	useTool(searchStockNews(id));
 	useTool(writeJoke(id));
 
 	// Attach every payment made during this response to the reply's metadata,
@@ -59,6 +59,7 @@ export function Joke({ id }: { id: string }) {
 				orchestratorModel: config.orchestratorModel,
 				jokeModel: draft.model,
 				paidBy: (await accessFor(id).catch(() => null))?.paidBy ?? null,
+				steps: handoff.takeSteps(id),
 			});
 			log.info(`stored joke ${row.id} for ${row.ticker} (${payments.length} payments, ${total} USDC authorized)`);
 		} catch (err) {

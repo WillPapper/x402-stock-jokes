@@ -14,6 +14,8 @@ export interface JokeRow {
 	orchestratorModel: string | null;
 	jokeModel: string | null;
 	paidBy: 'password' | 'x402' | null;
+	/** Full tool outputs: { stocktwits, ceramic, joke }. */
+	steps: Record<string, unknown> | null;
 	createdAt: string;
 }
 
@@ -29,6 +31,7 @@ interface RawRow {
 	orchestrator_model: string | null;
 	joke_model: string | null;
 	paid_by: string | null;
+	steps: string | null;
 	created_at: string;
 }
 
@@ -51,6 +54,7 @@ function parse(r: RawRow): JokeRow {
 		orchestratorModel: r.orchestrator_model,
 		jokeModel: r.joke_model,
 		paidBy: (r.paid_by as JokeRow['paidBy']) ?? null,
+		steps: r.steps ? (JSON.parse(r.steps) as Record<string, unknown>) : null,
 		createdAt: r.created_at,
 	};
 }
@@ -59,10 +63,10 @@ export async function insertJoke(row: Omit<JokeRow, 'id' | 'createdAt'> & { id?:
 	const full: JokeRow = { ...row, id: row.id ?? crypto.randomUUID(), createdAt: row.createdAt ?? new Date().toISOString() };
 	await db()
 		.prepare(
-			`INSERT INTO jokes (id, conversation_id, ticker, title, joke, facts, payments, total_authorized_usdc, orchestrator_model, joke_model, paid_by, created_at)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
+			`INSERT INTO jokes (id, conversation_id, ticker, title, joke, facts, payments, total_authorized_usdc, orchestrator_model, joke_model, paid_by, steps, created_at)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
 		)
-		.bind(full.id, full.conversationId, full.ticker, full.title, full.joke, JSON.stringify(full.facts), JSON.stringify(full.payments), full.totalAuthorizedUsdc, full.orchestratorModel, full.jokeModel, full.paidBy, full.createdAt)
+		.bind(full.id, full.conversationId, full.ticker, full.title, full.joke, JSON.stringify(full.facts), JSON.stringify(full.payments), full.totalAuthorizedUsdc, full.orchestratorModel, full.jokeModel, full.paidBy, full.steps ? JSON.stringify(full.steps) : null, full.createdAt)
 		.run();
 	return full;
 }

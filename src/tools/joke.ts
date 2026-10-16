@@ -83,6 +83,7 @@ export const writeJoke = (conversationId: string) =>
 	async run({ data, step, log }) {
 		const result = await step.do(`joke:${data.symbol.toUpperCase()}`, () => writeJokeFor(data.symbol.toUpperCase(), data.facts));
 		handoff.setDraft(conversationId, { symbol: data.symbol.toUpperCase(), facts: data.facts, joke: result.joke, model: result.model });
+		handoff.setStep(conversationId, 'joke', { ...result, promptFacts: data.facts });
 		log.info(`Joke from ${result.model}: ${result.joke.slice(0, 80)}…`);
 		return { output: asJson(result) };
 	},

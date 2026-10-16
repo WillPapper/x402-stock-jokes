@@ -135,7 +135,9 @@ export async function fetchStocktwitsSignalsFor(symbol: string): Promise<Stocktw
 	};
 }
 
-export const fetchStocktwitsSignals = defineTool({
+/** Created per conversation so the full response can be stored with the joke. */
+export const fetchStocktwitsSignals = (conversationId: string) =>
+	defineTool({
 	name: 'fetch_stocktwits_signals',
 	description:
 		'Step 1. Pay StockTwits (x402, USDC on Base) for details on a ticker and read its latest trader chatter: price at recent posts, bullish vs bearish counts, sentiment and volume change, sample messages. Always call this first.',
@@ -143,7 +145,8 @@ export const fetchStocktwitsSignals = defineTool({
 	durable: true,
 	async run({ data, step, log }) {
 		const signals = await step.do(`stocktwits:${data.symbol.toUpperCase()}`, () => fetchStocktwitsSignalsFor(data.symbol));
+		handoff.setStep(conversationId, 'stocktwits', signals);
 		log.info(`StockTwits ${signals.symbol}: ${signals.bullish} bullish / ${signals.bearish} bearish, latest ${signals.latestPrice ?? 'n/a'}; ${signals.payments.length} payment(s)`);
 		return { output: asJson(signals) };
 	},
-});
+	});

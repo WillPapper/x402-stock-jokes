@@ -3,6 +3,7 @@ import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { asJson } from '../lib/json.ts';
 import { paidDataFetch } from '../lib/env.ts';
+import { handoff } from '../lib/drafts.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 import { decodePaymentRequired } from '../lib/x402.ts';
 
@@ -40,7 +41,9 @@ export async function searchNewsFor(query: string, limit = 5): Promise<NewsSearc
 	};
 }
 
-export const searchStockNews = defineTool({
+/** Created per conversation so the full response can be stored with the joke. */
+export const searchStockNews = (conversationId: string) =>
+	defineTool({
 	name: 'search_stock_news',
 	description:
 		'Step 2. Pay Ceramic (x402, USDC on Base) for a web search and get recent news headlines about the company. Call this after fetch_stocktwits_signals, with a query like "<company name> <TICKER> stock news".',
@@ -48,7 +51,8 @@ export const searchStockNews = defineTool({
 	durable: true,
 	async run({ data, step, log }) {
 		const news = await step.do(`ceramic:${data.query}`, () => searchNewsFor(data.query));
+		handoff.setStep(conversationId, 'ceramic', news);
 		log.info(`Ceramic: ${news.results.length} results for "${data.query}"; ${news.payments.length} payment(s)`);
 		return { output: asJson(news) };
 	},
-});
+	});

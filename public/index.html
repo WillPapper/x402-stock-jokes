@@ -60,6 +60,15 @@
   .linkbtn { background:none; border:0; padding:0; color:var(--accent); text-decoration:underline; cursor:pointer; font:inherit; font-size:inherit }
   details summary { cursor:pointer; margin-top:10px }
   .muted { color:var(--muted) }
+  .badge { cursor:pointer; border:1px solid transparent }
+  .badge:hover, .badge.open { border-color:var(--accent) }
+  .hood { margin-top:10px; border-top:1px dashed var(--line); padding-top:10px }
+  .hood h4 { margin:0 0 4px; font-size:14px }
+  .hood p { margin:0 0 8px; font-size:14px; color:var(--muted) }
+  .hood pre { max-height:340px; overflow:auto; margin:0; font-size:12px }
+  .hood .links { font-size:13px; margin-top:8px }
+  .steps li.clickable { cursor:pointer }
+  .steps .hood { grid-column:1 / -1 }
 </style>
 </head>
 <body>
@@ -100,7 +109,7 @@
     <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
     <div class="step-title">Or use a coupon code for a free joke</div>
     <form class="pwrow" id="pwform">
-      <input id="password" type="text" placeholder="Coupon code" autocomplete="off" spellcheck="false">
+      <input id="password" type="text" placeholder="Coupon code" autocomplete="off" autocapitalize="none" spellcheck="false">
       <button type="submit" id="usepw">Use coupon</button>
     </form>
     <p class="err hidden" id="pwerr" style="margin:8px 0 0"></p>
@@ -157,6 +166,31 @@
     $('#wallet').innerHTML = `Paying from <a href="${w.basescan}" target="_blank" rel="noopener">${w.address.slice(0, 6)}…${w.address.slice(-4)}</a> on Base${w.usdc != null ? ` · ${Number(w.usdc).toFixed(3)} USDC left` : ''}${w.permit2Approved === false ? ' · <span class="err">Permit2 not approved</span>' : ''}`;
   }).catch(() => { $('#wallet').textContent = 'Wallet status unavailable.'; });
 
+  // ---- under the hood ----
+  const HOOD = {
+    stocktwits: { title: 'Step 1 · StockTwits', what: 'GET /api/2/symbols/show/<TICKER>.json through Cloudflare\'s Monetization Gateway (0.001 USDC, x402 exact scheme, settled on Base), plus the free symbol stream for recent posts. This is the parsed response the agent received:' },
+    ceramic: { title: 'Step 2 · Ceramic search', what: 'POST https://api.ceramic.ai/search through the Monetization Gateway (0.001 USDC, x402 exact). Top results the agent received:' },
+    joke: { title: 'Step 3 · AI Gateway', what: 'POST /ai/run on Cloudflare AI Gateway with Payment-Method: x402 (upto scheme: a ceiling is authorized, the real token cost is settled). The facts the agent passed in, and the model\'s answer:' },
+    turns: { title: 'Agent turns · AI Gateway', what: 'The orchestrator model itself runs through AI Gateway machine payments: every turn is an x402 authorization. Payments made during this joke:' },
+  };
+  function hoodPanel(key, data, extra) {
+    const h = HOOD[key] || { title: key, what: '' };
+    const el = document.createElement('div');
+    el.className = 'hood';
+    el.innerHTML = `<h4>${esc(h.title)}</h4><p>${esc(h.what)}</p><pre>${esc(JSON.stringify(data, null, 2) || 'no data')}</pre>${extra ? `<div class="links">${extra}</div>` : ''}`;
+    return el;
+  }
+  function toggleHood(container, key, data, extra, badge) {
+    const existing = container.querySelector('.hood');
+    const wasOpen = existing && existing.dataset.k === key;
+    if (existing) existing.remove();
+    container.querySelectorAll('.badge.open').forEach((b) => b.classList.remove('open'));
+    if (wasOpen) return;
+    const panel = hoodPanel(key, data, extra); panel.dataset.k = key;
+    container.appendChild(panel);
+    if (badge) badge.classList.add('open');
+  }
+
   // ---- current run ----
   function receiptChip(p) {
     if (!p) return '';
@@ -171,14 +205,17 @@
     if (receiptHtml !== undefined) dot.parentElement.querySelector('.receipt').innerHTML = receiptHtml;
   }
   function reset() {
+    runOutputs = {}; runPayments = []; document.querySelectorAll('#steps .hood').forEach((h) => h.remove()); document.querySelectorAll('#steps .badge.open').forEach((b) => b.classList.remove('open'));
     for (const k of Object.keys(dots)) setStep(k, '', '', '');
     setStep('started', 'running', 'Sending your request…');
     setStep('finished', '', 'Each model turn is its own x402 payment to AI Gateway.', '');
     for (const id of ['result', 'paywall', 'error', 'cachedwrap']) $('#' + id).classList.add('hidden');
     $('#joke').textContent = ''; $('#based').textContent = '';
   }
+  let runOutputs = {}; let runPayments = []; let runId = null;
   function render(snapshot) {
     let joke = '', based = '', payments = [], failed = null;
+    const seen = {};
     for (const m of snapshot.messages || []) {
       if (m.metadata && Array.isArray(m.metadata.payments)) payments = m.metadata.payments;
       for (const p of m.parts || []) {
@@ -186,13 +223,14 @@
           const out = p.output || {};
           const pay = (out.payments || [])[0];
           if (p.state === 'output-available') {
+            runOutputs[p.toolName] = out; seen[p.toolName] = 'done';
             let d = '';
             if (p.toolName === 'fetch_stocktwits_signals') d = `${out.title || out.symbol}: last ${out.latestPrice ? '$' + out.latestPrice : 'n/a'}, ${out.bullish} bullish / ${out.bearish} bearish of ${out.messagesSampled} posts`;
             else if (p.toolName === 'search_stock_news') d = (out.results || []).slice(0, 2).map((r) => r.title).join(' · ');
             else if (p.toolName === 'write_joke') d = `${out.model}`;
             setStep(p.toolName, 'done', d, receiptChip(pay));
-          } else if (p.state === 'output-error') setStep(p.toolName, 'error', (p.errorText || 'failed').slice(0, 200), '');
-          else setStep(p.toolName, 'running', 'Paying and fetching…', '');
+          } else if (p.state === 'output-error') { seen[p.toolName] = 'error'; setStep(p.toolName, 'error', (p.errorText || 'failed').slice(0, 200), ''); }
+          else { seen[p.toolName] = 'running'; setStep(p.toolName, 'running', 'Paying and fetching…', ''); }
         }
         if (p.type === 'text' && m.role === 'assistant') {
           const lines = p.text.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -203,7 +241,20 @@
       }
     }
     const turns = payments.filter((p) => p.label.includes('orchestrator'));
+    runPayments = payments;
     const settlement = (snapshot.settlements || [])[0];
+    // Exactly one step pulses: the one the agent is on (or about to call). Later steps say "not started".
+    if (!settlement) {
+      const order = ['fetch_stocktwits_signals', 'search_stock_news', 'write_joke'];
+      const next = order.find((n) => seen[n] !== 'done');
+      for (const n of order) {
+        if (seen[n]) continue;
+        if (n === next) setStep(n, 'running', 'Next: waiting for the agent to call this step…', '');
+        else setStep(n, '', 'Not started.', '');
+      }
+    } else {
+      for (const n of ['fetch_stocktwits_signals', 'search_stock_news', 'write_joke']) if (!seen[n]) setStep(n, 'error', 'Skipped.', '');
+    }
     if (settlement && settlement.outcome !== 'completed') failed = settlement.error && settlement.error.message || settlement.outcome;
     if (joke) { $('#joke').textContent = joke; $('#based').textContent = based; $('#result').classList.remove('hidden'); }
     if (settlement) {
@@ -240,7 +291,7 @@
 
   async function submit(sym, pw) {
     clearInterval(timer); reset(); go.disabled = true;
-    const id = 'web-' + Math.random().toString(16).slice(2, 10);
+    const id = 'web-' + Math.random().toString(16).slice(2, 10); runId = id;
     const url = `/agents/joke/${id}`;
     const headers = { 'content-type': 'application/json' };
     if (pw) headers['x-joke-password'] = pw;
@@ -257,6 +308,8 @@
     } catch (err) { setStep('started', 'error', String(err.message || err)); go.disabled = false; return; }
     if (pw) savePassword(pw);
     setStep('started', 'done', pw ? 'Accepted with coupon code.' : 'Accepted.');
+    setStep('fetch_stocktwits_signals', 'running', 'Next: waiting for the agent to call this step…');
+    setStep('search_stock_news', '', 'Not started.'); setStep('write_joke', '', 'Not started.');
     setStep('finished', 'running', 'Working…');
     const started = Date.now();
     timer = setInterval(async () => {
@@ -266,6 +319,18 @@
       } catch {}
     }, 1500);
   }
+  const STEP_KEY = { fetch_stocktwits_signals: 'stocktwits', search_stock_news: 'ceramic', write_joke: 'joke', finished: 'turns' };
+  document.querySelectorAll('#steps li').forEach((li) => {
+    const name = li.querySelector('.dot').dataset.step; const key = STEP_KEY[name]; if (!key) return;
+    li.classList.add('clickable'); li.title = 'Click to see what this step returned';
+    li.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return;
+      let data = key === 'turns' ? runPayments.filter((p) => p.label.includes('orchestrator')) : runOutputs[name];
+      if (!data || (Array.isArray(data) && !data.length)) data = { note: key === 'turns' ? 'Model turns are tallied when the agent finishes.' : 'This step has not returned yet.' };
+      const links = runId ? `<a href="/agents/joke/${runId}" target="_blank" rel="noopener">conversation JSON</a> · <a href="/api/events?conversation=${runId}" target="_blank" rel="noopener">x402 gateway events</a>` : '';
+      toggleHood(li, key, data, links, null);
+    });
+  });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const sym = ticker.value.trim().toUpperCase(); if (!sym) return;
@@ -283,15 +348,27 @@
   const seen = new Set();
   function jokeCard(j, isNew) {
     const when = new Date(j.createdAt);
-    const steps = (j.payments || []).filter((p) => !p.label.includes('orchestrator'));
-    const turns = (j.payments || []).filter((p) => p.label.includes('orchestrator'));
+    const pays = j.payments || [];
+    const turns = pays.filter((p) => p.label.includes('orchestrator'));
+    const find = (needle) => pays.find((p) => p.label.includes(needle));
+    const st = find('StockTwits symbols'), ce = find('Ceramic'), jk = find('AI Gateway joke');
+    const chip = (key, name, p) => `<span class="chip badge" data-k="${key}" title="Click to see what ${name} returned">${name}${p && p.tx ? ` <a href="${p.tx}" target="_blank" rel="noopener">${money(p.authorizedUsdc)} ↗</a>` : p ? ` ≤ ${money(p.authorizedUsdc)}` : ''}</span>`;
     const el = document.createElement('article');
     el.className = 'card' + (isNew ? ' new' : '');
     el.dataset.id = j.id;
     el.innerHTML = `<div class="meta"><span><span class="ticker">${esc(j.ticker)}</span>${j.title ? ' · ' + esc(j.title) : ''}</span><span title="${when.toISOString()}">${when.toLocaleString()}${j.paidBy === 'x402' ? ' · paid via x402' : ''}</span></div>
       <p class="joke">${esc(j.joke)}</p>
       <div class="step-detail">${esc((j.facts || []).slice(0, 3).join(' · '))}</div>
-      <div class="receipts">${steps.filter((p) => p.tx).map((p) => `<span class="chip">${esc(p.label.split(' ')[0])} <a href="${p.tx}" target="_blank" rel="noopener">${money(p.authorizedUsdc)} ↗</a></span>`).join('')}${j.paid ? `<span class="chip" title="USDC settled to AI Gateway on-chain while this joke ran (${j.paid.aiCount} transfers)"><a href="https://basescan.org/token/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913?a=${encodeURIComponent(WALLET || '')}" target="_blank" rel="noopener">AI Gateway ${j.paid.aiUsdc.toFixed(4)} ↗</a></span><span class="chip"><b>paid ${j.paid.totalUsdc.toFixed(4)} USDC</b></span>` : `<span class="chip">${turns.length + 1} AI Gateway calls</span>`}</div>`;
+      <div class="receipts">${chip('stocktwits', 'StockTwits', st)}${chip('ceramic', 'Ceramic', ce)}${chip('joke', 'AI Gateway joke', jk)}${chip('turns', `${turns.length} agent turns`, null)}${j.paid ? `<span class="chip"><b>paid ${j.paid.totalUsdc.toFixed(4)} USDC</b> on-chain</span>` : ''}</div>`;
+    const steps = j.steps || {};
+    el.querySelectorAll('.badge').forEach((b) => b.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return;
+      const key = b.dataset.k;
+      const fallback = { note: 'The full response for this step was not archived (jokes made before 2026-10-16 20:10 UTC only kept their payments and facts).', facts: j.facts || [], payment: key === 'stocktwits' ? st : key === 'ceramic' ? ce : jk };
+      const data = key === 'turns' ? (turns.length ? turns : { note: 'No per-turn records for this joke.' }) : (steps[key] || fallback);
+      const links = `<a href="/agents/joke/${encodeURIComponent(j.conversationId)}" target="_blank" rel="noopener">conversation JSON</a> · <a href="/api/events?conversation=${encodeURIComponent(j.conversationId)}" target="_blank" rel="noopener">x402 gateway events</a>`;
+      toggleHood(el, key, data, links, b);
+    }));
     return el;
   }
   function sparkline(perHour) {

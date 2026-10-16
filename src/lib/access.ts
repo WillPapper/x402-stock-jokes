@@ -39,7 +39,8 @@ export async function checkAccess(request: Request, conversationId?: string): Pr
 	};
 	const given = request.headers.get(PASSWORD_HEADER) ?? url.searchParams.get('password');
 	if (given !== null) {
-		if (expected && timingSafeEqual(given, expected)) return done({ ok: true, by: 'password' });
+		// Case-insensitive: phones auto-capitalize the first letter, desktops don't.
+		if (expected && timingSafeEqual(given.trim().toLowerCase(), expected.trim().toLowerCase())) return done({ ok: true, by: 'password' });
 		return done({ ok: false, status: 401, reason: 'wrong coupon code; drop the X-Joke-Password header to pay 0.10 USDC with x402 instead' });
 	}
 

@@ -120,7 +120,9 @@ export function createAiRunFetch(options: X402AiGatewayOptions): typeof fetch {
 		if ('messages' in rest) rest.messages = normalizeMessagesForWorkersAi(rest.messages);
 		// Orchestration turns are tool routing; keep gpt-oss reasoning short and cheap.
 		if (typeof model === 'string' && model.startsWith('openai/') && !('reasoning_effort' in rest)) rest.reasoning_effort = 'low';
-		// Thinking models (Qwen 3.8, Gemma 4, GLM 4.7) need room to think before the tool call.
+		// Thinking off for orchestration: tool routing doesn't need it and Qwen's final
+		// reply turn otherwise thinks for a minute or more.
+		if (typeof model === 'string' && !model.startsWith('openai/') && !('chat_template_kwargs' in rest)) rest.chat_template_kwargs = { enable_thinking: false };
 		if (!('max_tokens' in rest) && !('max_completion_tokens' in rest)) rest.max_tokens = 2048;
 		const started = Date.now();
 		const res = await options.paidFetch(aiRunUrl, {

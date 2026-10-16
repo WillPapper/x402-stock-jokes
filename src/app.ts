@@ -99,13 +99,13 @@ interface Snapshot {
 	settlements?: { outcome: string; error?: { message?: string } }[];
 }
 function compact(id: string, snap: Snapshot) {
-	const steps: Record<string, { state: string; detail?: string; receipts?: unknown }> = {};
+	const steps: Record<string, { state: string; detail?: string; receipts?: unknown; output?: unknown }> = {};
 	let reply = '';
 	let payments: unknown[] = [];
 	for (const m of snap.messages ?? []) {
 		if (Array.isArray(m.metadata?.payments)) payments = m.metadata.payments as unknown[];
 		for (const p of m.parts) {
-			if (p.type === 'dynamic-tool' && p.toolName) steps[p.toolName] = { state: p.state ?? 'pending', ...(p.errorText ? { detail: p.errorText } : {}), ...(p.output && Array.isArray(p.output.payments) ? { receipts: p.output.payments } : {}) };
+			if (p.type === 'dynamic-tool' && p.toolName) steps[p.toolName] = { state: p.state ?? 'pending', ...(p.errorText ? { detail: p.errorText } : {}), ...(p.output && Array.isArray(p.output.payments) ? { receipts: p.output.payments } : {}), ...(p.output ? { output: p.output } : {}) };
 			if (p.type === 'text' && m.role === 'assistant' && p.text) reply = p.text;
 		}
 	}
