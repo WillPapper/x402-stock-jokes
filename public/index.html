@@ -213,57 +213,43 @@
     $('#joke').textContent = ''; $('#based').textContent = '';
   }
   let runOutputs = {}; let runPayments = []; let runId = null;
-  function render(snapshot) {
-    let joke = '', based = '', payments = [], failed = null;
-    const seen = {};
-    for (const m of snapshot.messages || []) {
-      if (m.metadata && Array.isArray(m.metadata.payments)) payments = m.metadata.payments;
-      for (const p of m.parts || []) {
-        if (p.type === 'dynamic-tool') {
-          const out = p.output || {};
-          const pay = (out.payments || [])[0];
-          if (p.state === 'output-available') {
-            runOutputs[p.toolName] = out; seen[p.toolName] = 'done';
-            let d = '';
-            if (p.toolName === 'fetch_stocktwits_signals') d = `${out.title || out.symbol}: last ${out.latestPrice ? '$' + out.latestPrice : 'n/a'}, ${out.bullish} bullish / ${out.bearish} bearish of ${out.messagesSampled} posts`;
-            else if (p.toolName === 'search_stock_news') d = (out.results || []).slice(0, 2).map((r) => r.title).join(' · ');
-            else if (p.toolName === 'write_joke') d = `${out.model}`;
-            setStep(p.toolName, 'done', d, receiptChip(pay));
-          } else if (p.state === 'output-error') { seen[p.toolName] = 'error'; setStep(p.toolName, 'error', (p.errorText || 'failed').slice(0, 200), ''); }
-          else { seen[p.toolName] = 'running'; setStep(p.toolName, 'running', 'Paying and fetching…', ''); }
-        }
-        if (p.type === 'text' && m.role === 'assistant') {
-          const lines = p.text.split('\n').map((l) => l.trim()).filter(Boolean);
-          const basedIdx = lines.findIndex((l) => /^based( on)?\s*:/i.test(l));
-          joke = (basedIdx > 0 ? lines.slice(0, basedIdx) : lines.filter((l) => !/^(paid|total)\s*:/i.test(l))).join('\n');
-          based = basedIdx >= 0 ? lines[basedIdx] : '';
-        }
-      }
+  // Status comes from /joke/<id>, built from D1 events, never from the agent's
+  // Durable Object (reads there would lend the reader's location to the payments).
+  function render(st) {
+    const order = ['fetch_stocktwits_signals', 'search_stock_news', 'write_joke'];
+    const states = {};
+    for (const name of order) {
+      const sdef = st.steps[name]; if (!sdef) continue;
+      states[name] = sdef.state;
+      if (sdef.state === 'done') {
+        const out = sdef.output || {}; runOutputs[name] = out;
+        const pay = (out.payments || [])[0];
+        let d = '';
+        if (name === 'fetch_stocktwits_signals') d = `${out.title || out.symbol}: last ${out.latestPrice ? '$' + out.latestPrice : 'n/a'}, ${out.bullish} bullish / ${out.bearish} bearish of ${out.messagesSampled} posts`;
+        else if (name === 'search_stock_news') d = (out.results || []).slice(0, 2).map((r) => r.title).join(' · ');
+        else if (name === 'write_joke') d = `${out.model}`;
+        setStep(name, 'done', d, receiptChip(pay));
+      } else if (sdef.state === 'error') setStep(name, 'error', (sdef.detail || 'failed').slice(0, 200), '');
+      else if (sdef.state === 'running') setStep(name, 'running', 'Paying and fetching…', '');
     }
-    const turns = payments.filter((p) => p.label.includes('orchestrator'));
-    runPayments = payments;
-    const settlement = (snapshot.settlements || [])[0];
-    // Exactly one step pulses: the one the agent is on (or about to call). Later steps say "not started".
-    if (!settlement) {
-      const order = ['fetch_stocktwits_signals', 'search_stock_news', 'write_joke'];
-      const next = order.find((n) => seen[n] !== 'done');
+    runPayments = st.payments || [];
+    const turns = runPayments.filter((p) => p.label.includes('orchestrator') && p.ok);
+    if (!st.done) {
+      const next = order.find((n) => states[n] !== 'done');
       for (const n of order) {
-        if (seen[n]) continue;
+        if (states[n] && states[n] !== 'pending') continue;
         if (n === next) setStep(n, 'running', 'Next: waiting for the agent to call this step…', '');
         else setStep(n, '', 'Not started.', '');
       }
-    } else {
-      for (const n of ['fetch_stocktwits_signals', 'search_stock_news', 'write_joke']) if (!seen[n]) setStep(n, 'error', 'Skipped.', '');
+      setStep('finished', 'running', turns.length ? `Working… ${turns.length} paid model turn${turns.length === 1 ? '' : 's'} so far` : 'Working…', turns.map(receiptChip).join(' '));
+      return false;
     }
-    if (settlement && settlement.outcome !== 'completed') failed = settlement.error && settlement.error.message || settlement.outcome;
-    if (joke) { $('#joke').textContent = joke; $('#based').textContent = based; $('#result').classList.remove('hidden'); }
-    if (settlement) {
-      setStep('finished', failed ? 'error' : 'done', failed ? 'Failed' : `${turns.length} paid model turns`, turns.map(receiptChip).join(' '));
-      if (failed) { $('#error').textContent = failed; $('#error').classList.remove('hidden'); $('#result').classList.remove('hidden'); }
-      return true;
-    }
-    setStep('finished', 'running', 'Working… the model turns are tallied when the agent finishes.', '');
-    return false;
+    for (const n of order) if (!states[n] || states[n] === 'pending') setStep(n, 'error', 'Skipped.', '');
+    const failed = st.outcome !== 'completed' ? (st.error || st.outcome) : null;
+    if (st.joke) { $('#joke').textContent = st.joke; $('#based').textContent = st.basedOn ? 'Based on: ' + st.basedOn : ''; $('#result').classList.remove('hidden'); }
+    setStep('finished', failed ? 'error' : 'done', failed ? 'Failed' : `${turns.length} paid model turns`, turns.map(receiptChip).join(' '));
+    if (failed) { $('#error').textContent = failed; $('#error').classList.remove('hidden'); $('#result').classList.remove('hidden'); }
+    return true;
   }
 
   async function showRunCost(sym) {
@@ -315,8 +301,8 @@
     const started = Date.now();
     timer = setInterval(async () => {
       try {
-        const snap = await (await fetch(url)).json();
-        if (render(snap) || Date.now() - started > 240000) { clearInterval(timer); go.disabled = false; refreshFeed(); setTimeout(() => showRunCost(sym), 4000); }
+        const st = await (await fetch(`/joke/${id}`)).json();
+        if (render(st) || Date.now() - started > 300000) { clearInterval(timer); go.disabled = false; refreshFeed(); setTimeout(() => showRunCost(sym), 4000); }
       } catch {}
     }, 1500);
   }

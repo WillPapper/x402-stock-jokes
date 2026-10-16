@@ -220,7 +220,13 @@ Verified 2026-10-16: an unpaid POST gets the gateway's 402 with a 0.10 USDC quot
 
 ## Where the agent runs, and why it matters
 
-AI Gateway machine payments are US-only, and the check is made against the country of the Cloudflare datacenter that executes the request, which is chosen near whoever submitted the joke. A visitor whose traffic lands on a non-US colo would make every AI Gateway call fail with `403 disallowed visitor country`, even though the app's account and wallet are the payer. So every conversation is started by `JokeRunner` (`src/cloudflare.ts`), a Durable Object in the `us` jurisdiction (hard constraint; `RUNNER_LOCATION_HINT` picks the coast): the agent's own Durable Object is placed next to it, in the US, and all its paid calls leave from there. The 202 response and the `gate` events record the runner's and the agent's colo so this can be verified. Full write-up and bug report: [docs/ai-gateway-visitor-country.md](./docs/ai-gateway-visitor-country.md).
+Monetization Gateway and AI Gateway machine payments are US-only, and they evaluate the country of the **visitor whose request is in flight** when the Worker pays, not the account, the wallet, or the datacenter. Cloudflare carries that identity down the whole request chain, and a Durable Object attributes its outbound calls to whichever incoming request is active. So the path is built to keep every visitor out of the paying code:
+
+1. The entry Worker (any colo, any visitor) only checks the coupon or the gateway's payment and **queues** the message into `JokeRunner`, a Durable Object in the `us` jurisdiction (`src/cloudflare.ts`).
+2. The runner's **alarm**, which has no originating request, dispatches the agent 3 s later. The agent's Durable Object is placed next to the runner (ORD so far) and every paid call leaves from there with no visitor attached.
+3. **Nothing reads the agent's object while it works.** Tools and the agent log progress to D1 (`events`), the finished joke goes to D1 (`jokes`), and `GET /joke/<id>` is served from D1. Reading `GET /agents/joke/<id>` from outside the US during a run would make its next payment fail; it's fine afterwards.
+
+Verified with a Canadian VPN: submit, poll every 2 s, full run, all payments 200. The `gate` events record visitor country, runner and agent colo for every run. Full write-up and bug report: [docs/ai-gateway-visitor-country.md](./docs/ai-gateway-visitor-country.md).
 
 ## Logging and reporting gateway bugs
 
@@ -332,7 +338,7 @@ migrations/                    D1 schema
 scripts/                       wallet:new, approve, doctor, pay-for-joke
 ```
 
-Models: the orchestrator is `alibaba/qwen3.8-27b` (best multi-step tool use of the four machine-payment models) and the joke writer is `google/gemma-4-26b-a4b-it` (top of the four on creative-writing benchmarks). Both are thinking models; thinking is turned off for both via `chat_template_kwargs.enable_thinking=false` (tool routing doesn't need it, and Qwen's final reply turn otherwise thinks for a minute or more). Change either model in `wrangler.jsonc` vars.
+Models: the orchestrator is `alibaba/qwen3.8-27b` (best multi-step tool use of the four machine-payment models) and the joke writer is `google/gemma-4-26b-a4b-it` (top of the four on creative-writing benchmarks). Both are thinking models; the joke call turns thinking off via `chat_template_kwargs.enable_thinking=false`, while the orchestrator keeps it on (without it Qwen asked for ticker confirmation instead of calling tools; the price is a slow final turn). Change either model in `wrangler.jsonc` vars.
 
 Cost per joke: about 0.002 USDC for data plus a few thousandths of a USDC settled for inference. AI Gateway quotes a *ceiling* per call against the model's full context window (about 0.13 USDC per Qwen turn, 0.026 per Gemma call), so the wallet must hold roughly 0.5 USDC of headroom even though far less is charged.
 
@@ -344,7 +350,7 @@ Cost per joke: about 0.002 USDC for data plus a few thousandths of a USDC settle
 - **Base RPC rate limits.** Public Base RPCs return 429 to Cloudflare's edge under light load; `/api/wallet` rotates through several and falls back to address-only. Set `BASE_RPC_URL` for the scripts if `mainnet.base.org` throttles you locally.
 - **Reply format drift.** The orchestrator sometimes writes `Based:` instead of `Based on:`; the page accepts both. The D1 row uses the facts passed to `write_joke`, not the reply text.
 - **`cf workers secrets bulk` did not set secrets** in this session (it reported success, then `secrets list` was empty); see [docs/cf-secrets-bulk-bug.md](./docs/cf-secrets-bulk-bug.md). `wrangler secret bulk` works.
-- **`503 facilitator verify returned 403` / `403 disallowed visitor country` from AI Gateway** were the geo check described above, not flakiness; the runner fixes them. `write_joke` still retries once on a 5xx.
+- **`503 facilitator verify returned 403` / `403 disallowed visitor country`** were the visitor-identity check described above, not flakiness; the alarm-driven runner plus D1-served status fixes them. `write_joke` still retries once on a 5xx.
 - **Only `write_joke` may produce the joke.** The agent is told it cannot write jokes itself and may call a tool at most twice per reply; an earlier version retried a failing joke call seven times.
 - **Only one hostname.** Adding the custom domain turned off the `workers.dev` route (requests there get Cloudflare error 1042). Everything, including the password path, goes through `jokes.papper.me`.
 - **Admission is recorded in D1**, not in memory: the HTTP gate and the agent's Durable Object are different isolates, so `access` rows carry `paid_by` across.

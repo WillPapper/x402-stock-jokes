@@ -43,7 +43,10 @@ export function Joke({ id }: { id: string }) {
 		const failedTools = response.toolCalls.filter((t) => t.isError).map((t) => t.tool);
 		if (failedTools.length) logEvent('error', false, { where: 'agent-finish', failedTools, toolCalls: response.toolCalls.length }, { conversationId: id, label: 'tool failures' });
 		const draft = handoff.takeDraft(id);
-		if (!draft) return;
+		if (!draft) {
+			logEvent('agent.done', false, { reason: failedTools.length ? `tool failures: ${failedTools.join(', ')}` : 'finished without a joke' }, { conversationId: id, label: 'agent done' });
+			return;
+		}
 		const payments = ledger.since(marks.get(id) ?? 0);
 		marks.delete(id);
 		const total = payments.reduce((sum, p) => sum + Number(p.authorizedUsdc), 0).toFixed(6);
@@ -62,6 +65,7 @@ export function Joke({ id }: { id: string }) {
 				steps: handoff.takeSteps(id),
 			});
 			log.info(`stored joke ${row.id} for ${row.ticker} (${payments.length} payments, ${total} USDC authorized)`);
+			logEvent('agent.done', true, { jokeId: row.id, ticker: row.ticker, payments: payments.length }, { conversationId: id, label: 'agent done' });
 		} catch (err) {
 			log.error(`failed to store joke: ${(err as Error).message}`);
 		}
@@ -71,6 +75,7 @@ export function Joke({ id }: { id: string }) {
 		'You are Joke, a tool-driven agent. You do NOT write jokes yourself: the only joke you may ever output is the exact text returned by the write_joke tool.',
 		'Every data point you mention must come from a tool result, and every tool call is a USDC micro-payment (x402) that the user is happy to make.',
 		'',
+		'Whatever uppercase symbol the user gives IS the ticker: never ask which company they mean or for confirmation; just run the steps with it.',
 		'When the user names a ticker, run these three steps in order, every time:',
 		'1. fetch_stocktwits_signals with the ticker.',
 		'2. search_stock_news with a query built from the company title and ticker, e.g. "NVIDIA NVDA stock news".',

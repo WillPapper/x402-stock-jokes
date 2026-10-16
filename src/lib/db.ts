@@ -81,6 +81,11 @@ export async function listJokes(opts: { after?: string; limit?: number } = {}): 
 	return results.map(parse);
 }
 
+export async function jokeForConversation(conversationId: string): Promise<JokeRow | null> {
+	const r = await db().prepare('SELECT * FROM jokes WHERE conversation_id = ?1 ORDER BY created_at DESC LIMIT 1').bind(conversationId).first<RawRow>();
+	return r ? parse(r) : null;
+}
+
 export async function latestJokeFor(ticker: string): Promise<JokeRow | null> {
 	const r = await db().prepare('SELECT * FROM jokes WHERE ticker = ?1 ORDER BY created_at DESC LIMIT 1').bind(ticker.toUpperCase()).first<RawRow>();
 	return r ? parse(r) : null;

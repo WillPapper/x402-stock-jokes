@@ -15,6 +15,7 @@ import { asJson } from '../lib/json.ts';
 import { paidDataFetch } from '../lib/env.ts';
 import { handoff } from '../lib/drafts.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
+import { logEvent } from '../lib/log.ts';
 import { decodePaymentRequired } from '../lib/x402.ts';
 
 export const STOCKTWITS_GATEWAY = 'https://api-staging-mgw.stocktwits.com';
@@ -144,9 +145,16 @@ export const fetchStocktwitsSignals = (conversationId: string) =>
 	input: v.object({ symbol: v.pipe(v.string(), v.minLength(1), v.maxLength(12)) }),
 	durable: true,
 	async run({ data, step, log }) {
+		logEvent('tool.start', true, { tool: 'fetch_stocktwits_signals', input: data }, { conversationId, label: 'fetch_stocktwits_signals' });
+		try {
 		const signals = await step.do(`stocktwits:${data.symbol.toUpperCase()}`, () => fetchStocktwitsSignalsFor(data.symbol));
 		handoff.setStep(conversationId, 'stocktwits', signals);
 		log.info(`StockTwits ${signals.symbol}: ${signals.bullish} bullish / ${signals.bearish} bearish, latest ${signals.latestPrice ?? 'n/a'}; ${signals.payments.length} payment(s)`);
+		logEvent('tool.done', true, { tool: 'fetch_stocktwits_signals', output: signals }, { conversationId, label: 'fetch_stocktwits_signals' });
 		return { output: asJson(signals) };
+		} catch (err) {
+			logEvent('tool.error', false, { tool: 'fetch_stocktwits_signals', error: (err as Error).message.slice(0, 400) }, { conversationId, label: 'fetch_stocktwits_signals' });
+			throw err;
+		}
 	},
 	});

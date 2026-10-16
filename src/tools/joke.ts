@@ -5,6 +5,7 @@ import { asJson } from '../lib/json.ts';
 import { config, paidInferenceFetch } from '../lib/env.ts';
 import { handoff } from '../lib/drafts.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
+import { logEvent } from '../lib/log.ts';
 
 export interface JokeResult {
 	joke: string;
@@ -81,10 +82,17 @@ export const writeJoke = (conversationId: string) =>
 	}),
 	durable: true,
 	async run({ data, step, log }) {
+		logEvent('tool.start', true, { tool: 'write_joke', input: data }, { conversationId, label: 'write_joke' });
+		try {
 		const result = await step.do(`joke:${data.symbol.toUpperCase()}`, () => writeJokeFor(data.symbol.toUpperCase(), data.facts));
 		handoff.setDraft(conversationId, { symbol: data.symbol.toUpperCase(), facts: data.facts, joke: result.joke, model: result.model });
 		handoff.setStep(conversationId, 'joke', { ...result, promptFacts: data.facts });
 		log.info(`Joke from ${result.model}: ${result.joke.slice(0, 80)}…`);
+		logEvent('tool.done', true, { tool: 'write_joke', output: { ...result, promptFacts: data.facts } }, { conversationId, label: 'write_joke' });
 		return { output: asJson(result) };
+		} catch (err) {
+			logEvent('tool.error', false, { tool: 'write_joke', error: (err as Error).message.slice(0, 400) }, { conversationId, label: 'write_joke' });
+			throw err;
+		}
 	},
 	});

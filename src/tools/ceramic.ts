@@ -5,6 +5,7 @@ import { asJson } from '../lib/json.ts';
 import { paidDataFetch } from '../lib/env.ts';
 import { handoff } from '../lib/drafts.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
+import { logEvent } from '../lib/log.ts';
 import { decodePaymentRequired } from '../lib/x402.ts';
 
 export const CERAMIC_SEARCH_URL = 'https://api.ceramic.ai/search';
@@ -50,9 +51,16 @@ export const searchStockNews = (conversationId: string) =>
 	input: v.object({ query: v.pipe(v.string(), v.minLength(3), v.maxLength(200)) }),
 	durable: true,
 	async run({ data, step, log }) {
+		logEvent('tool.start', true, { tool: 'search_stock_news', input: data }, { conversationId, label: 'search_stock_news' });
+		try {
 		const news = await step.do(`ceramic:${data.query}`, () => searchNewsFor(data.query));
 		handoff.setStep(conversationId, 'ceramic', news);
 		log.info(`Ceramic: ${news.results.length} results for "${data.query}"; ${news.payments.length} payment(s)`);
+		logEvent('tool.done', true, { tool: 'search_stock_news', output: news }, { conversationId, label: 'search_stock_news' });
 		return { output: asJson(news) };
+		} catch (err) {
+			logEvent('tool.error', false, { tool: 'search_stock_news', error: (err as Error).message.slice(0, 400) }, { conversationId, label: 'search_stock_news' });
+			throw err;
+		}
 	},
 	});

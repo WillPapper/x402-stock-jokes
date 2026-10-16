@@ -7,7 +7,7 @@
  */
 import { env } from 'cloudflare:workers';
 
-export type EventKind = 'x402.payment' | 'gate' | 'ai.turn' | 'error';
+export type EventKind = 'x402.payment' | 'gate' | 'ai.turn' | 'error' | 'tool.start' | 'tool.done' | 'tool.error' | 'agent.done';
 
 export interface LoggedEvent {
 	ts: string;
@@ -48,7 +48,7 @@ export function logEvent(kind: EventKind, ok: boolean, data: Record<string, unkn
 	return event;
 }
 
-export async function listEvents(opts: { limit?: number; conversationId?: string; kind?: string; failuresOnly?: boolean; since?: string } = {}) {
+export async function listEvents(opts: { limit?: number; conversationId?: string; kind?: string; failuresOnly?: boolean; since?: string; ascending?: boolean } = {}) {
 	const db = (env as unknown as { DB?: D1Database }).DB;
 	if (!db) return [];
 	const where: string[] = [];
@@ -67,7 +67,7 @@ export async function listEvents(opts: { limit?: number; conversationId?: string
 		binds.push(opts.since);
 	}
 	const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
-	const sql = `SELECT id, ts, kind, conversation_id, label, ok, data FROM events ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT ${limit}`;
+	const sql = `SELECT id, ts, kind, conversation_id, label, ok, data FROM events ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id ${opts.ascending ? 'ASC' : 'DESC'} LIMIT ${limit}`;
 	const { results } = await db.prepare(sql).bind(...binds).all<{ id: number; ts: string; kind: string; conversation_id: string | null; label: string | null; ok: number; data: string }>();
 	return results.map((r) => ({ id: r.id, ts: r.ts, kind: r.kind, conversationId: r.conversation_id, label: r.label, ok: r.ok === 1, data: JSON.parse(r.data) as Record<string, unknown> }));
 }

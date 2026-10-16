@@ -6,7 +6,7 @@ import { base } from 'viem/chains';
 import { Joke } from './agents/joke.ts';
 import { PRICE_USDC, checkAccess, paymentRequiredBody } from './lib/access.ts';
 import { createX402AiGatewayProvider } from './lib/ai-gateway-provider.ts';
-import { jokeStats, latestJokeFor, listJokes, recordAccess, type JokeRow } from './lib/db.ts';
+import { jokeForConversation, jokeStats, latestJokeFor, listJokes, recordAccess, type JokeRow } from './lib/db.ts';
 import { amountsByHash, summarize, walletTransfers, type Transfer } from './lib/transfers.ts';
 import { config, paidInferenceFetch } from './lib/env.ts';
 import { ledger } from './lib/ledger.ts';
@@ -55,8 +55,8 @@ app.use('/agents/joke/:id', async (c, next) => {
 	// `us` jurisdiction is a hard constraint (execution + storage in the US); the hint only picks the coast.
 	const us = config.runner.jurisdiction('us');
 	const runner = us.get(us.idFromName('us-runner'), { locationHint: config.runnerLocationHint });
-	const started = await (runner as unknown as { submit(req: { id: string; body: string; by: 'password' | 'x402' }): Promise<{ submissionId: string; runnerColo: string | null; runnerCountry: string | null }> }).submit({ id, body: message.body, by: access.by });
-	return c.json({ streamUrl: new URL(c.req.url).origin + `/agents/joke/${id}`, submissionId: started.submissionId, runner: { colo: started.runnerColo, country: started.runnerCountry } }, 202);
+	const queued = await (runner as unknown as { submit(req: { id: string; body: string; by: 'password' | 'x402' }): Promise<{ queued: true; jurisdiction: string | undefined }> }).submit({ id, body: message.body, by: access.by });
+	return c.json({ streamUrl: new URL(c.req.url).origin + `/agents/joke/${id}`, queued: queued.queued, runner: { jurisdiction: queued.jurisdiction, startsFrom: 'alarm' } }, 202);
 });
 
 // Talk to Joke with one POST per message, then GET the same URL to read:
@@ -86,41 +86,78 @@ app.post('/joke/:ticker', async (c) => {
 	const origin = new URL(c.req.url).origin;
 	return c.json({ id, ticker, status: 'accepted', poll: `${origin}/joke/${id}`, note: 'Poll the `poll` URL every few seconds (free) until `done` is true.' }, 202);
 });
+// Status is served from D1, never from the agent's Durable Object: a read that
+// reaches the object while it is paying lends the reader's visitor identity to
+// those payments (measured; see docs/ai-gateway-visitor-country.md).
 app.get('/joke/:id', async (c) => {
 	const id = c.req.param('id');
-	if (!/^j-[a-z0-9.-]+$/.test(id)) return c.json({ error: 'bad_id' }, 400);
-	const res = await app.fetch(new Request(new URL(`/agents/joke/${id}`, c.req.url)), c.env, c.executionCtx);
-	if (!res.ok) return c.json({ error: 'not_found', message: `no joke with id ${id}` }, res.status === 404 ? 404 : 502);
-	return c.json(compact(id, (await res.json()) as Snapshot));
+	if (!/^[A-Za-z0-9._-]{1,80}$/.test(id)) return c.json({ error: 'bad_id' }, 400);
+	return c.json(await statusFromDb(id));
 });
 
-interface Snapshot {
-	messages?: { role: string; parts: { type: string; text?: string; toolName?: string; state?: string; output?: Record<string, unknown>; errorText?: string }[]; metadata?: Record<string, unknown> }[];
-	settlements?: { outcome: string; error?: { message?: string } }[];
-}
-function compact(id: string, snap: Snapshot) {
-	const steps: Record<string, { state: string; detail?: string; receipts?: unknown; output?: unknown }> = {};
-	let reply = '';
-	let payments: unknown[] = [];
-	for (const m of snap.messages ?? []) {
-		if (Array.isArray(m.metadata?.payments)) payments = m.metadata.payments as unknown[];
-		for (const p of m.parts) {
-			if (p.type === 'dynamic-tool' && p.toolName) steps[p.toolName] = { state: p.state ?? 'pending', ...(p.errorText ? { detail: p.errorText } : {}), ...(p.output && Array.isArray(p.output.payments) ? { receipts: p.output.payments } : {}), ...(p.output ? { output: p.output } : {}) };
-			if (p.type === 'text' && m.role === 'assistant' && p.text) reply = p.text;
+const TOOL_ORDER = ['fetch_stocktwits_signals', 'search_stock_news', 'write_joke'] as const;
+async function statusFromDb(id: string) {
+	const [events, row] = await Promise.all([listEvents({ conversationId: id, limit: 300, ascending: true }), jokeForConversation(id)]);
+	const steps: Record<string, { state: 'pending' | 'running' | 'done' | 'error'; detail?: string; receipts?: unknown; output?: unknown }> = {};
+	for (const t of TOOL_ORDER) steps[t] = { state: 'pending' };
+	const payments: { label: string; authorizedUsdc: string | null; scheme: string | null; tx: string | null; ok: boolean; at: string }[] = [];
+	let turns = 0;
+	let lastFailure: { at: string; error: string } | null = null;
+	let agentDone: { ok: boolean; reason?: string } | null = null;
+	let started = false;
+	for (const e of events) {
+		const d = e.data;
+		if (e.kind === 'gate' && d.probe === 'runner') started = true;
+		if (e.kind === 'tool.start' && typeof d.tool === 'string' && steps[d.tool]) steps[d.tool] = { state: 'running' };
+		if (e.kind === 'tool.done' && typeof d.tool === 'string' && steps[d.tool]) {
+			const output = d.output as { payments?: unknown } | undefined;
+			steps[d.tool] = { state: 'done', output, receipts: output?.payments };
 		}
+		if (e.kind === 'tool.error' && typeof d.tool === 'string' && steps[d.tool]) steps[d.tool] = { state: 'error', detail: String(d.error ?? 'failed') };
+		if (e.kind === 'x402.payment') {
+			const attempts = (d.attempts as { paymentResponse?: { transaction?: string } }[] | undefined) ?? [];
+			const tx = attempts.map((a) => a.paymentResponse?.transaction).find(Boolean) ?? null;
+			if (d.authorizedUsdc || !e.ok) payments.push({ label: e.label ?? String(d.label ?? ''), authorizedUsdc: (d.authorizedUsdc as string | null) ?? null, scheme: (d.scheme as string | null) ?? null, tx: tx ? `https://basescan.org/tx/${tx}` : null, ok: e.ok, at: e.ts });
+		}
+		if (e.kind === 'ai.turn' && e.ok) turns++;
+		if (!e.ok && (e.kind === 'ai.turn' || e.kind === 'tool.error' || e.kind === 'error')) lastFailure = { at: e.ts, error: String(d.error ?? d.reason ?? e.label ?? 'failed').slice(0, 300) };
+		if (e.kind === 'agent.done') agentDone = { ok: e.ok, reason: typeof d.reason === 'string' ? d.reason : undefined };
 	}
-	const settlement = snap.settlements?.[0];
-	const lines = reply.split('\n').map((l) => l.trim()).filter(Boolean);
-	const basedIdx = lines.findIndex((l) => /^based( on)?\s*:/i.test(l));
+	const lastAt = events.at(-1)?.ts ?? null;
+	const idleMs = lastAt ? Date.now() - Date.parse(lastAt) : 0;
+	let done = false;
+	let outcome: 'working' | 'completed' | 'failed' | 'unknown' = events.length ? 'working' : 'unknown';
+	let error: string | null = null;
+	if (row) {
+		done = true;
+		outcome = 'completed';
+	} else if (agentDone && !agentDone.ok) {
+		done = true;
+		outcome = 'failed';
+		error = agentDone.reason ?? 'the agent finished without a joke';
+	} else if (lastFailure && lastFailure.at === lastAt && idleMs > 45_000) {
+		done = true;
+		outcome = 'failed';
+		error = lastFailure.error;
+	} else if (started && idleMs > 10 * 60_000) {
+		done = true;
+		outcome = 'failed';
+		error = 'no progress for 10 minutes';
+	}
 	return {
 		id,
-		done: !!settlement,
-		outcome: settlement?.outcome ?? 'working',
-		error: settlement?.error?.message ?? null,
-		joke: basedIdx > 0 ? lines.slice(0, basedIdx).join('\n') : lines.filter((l) => !/^(paid|total)\s*:/i.test(l)).join('\n') || null,
-		basedOn: basedIdx >= 0 ? lines[basedIdx]!.replace(/^based( on)?\s*:\s*/i, '') : null,
+		done,
+		outcome,
+		error,
+		joke: row?.joke ?? null,
+		basedOn: row ? row.facts.slice(0, 3).join('; ') : null,
+		facts: row?.facts ?? null,
+		ticker: row?.ticker ?? null,
 		steps,
 		payments,
+		turns,
+		lastEventAt: lastAt,
+		jokeId: row?.id ?? null,
 	};
 }
 
