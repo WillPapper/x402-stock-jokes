@@ -82,7 +82,8 @@ export async function fetchStocktwitsSignalsFor(symbol: string): Promise<Stocktw
 	const show = (await showRes.json()) as ShowResponse;
 	if (show.symbol?.title) handoff.setTitle(sym, show.symbol.title);
 
-	const streamRes = await paid(`${STOCKTWITS_GATEWAY}/api/2/streams/symbol/${sym}.json`);
+	const free = paidDataFetch(`StockTwits streams/symbol/${sym} (free)`);
+	const streamRes = await free(`${STOCKTWITS_GATEWAY}/api/2/streams/symbol/${sym}.json`);
 	const stream: StreamResponse = streamRes.ok ? ((await streamRes.json()) as StreamResponse) : {};
 	const messages = stream.messages ?? [];
 

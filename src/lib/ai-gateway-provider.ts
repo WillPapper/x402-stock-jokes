@@ -99,7 +99,7 @@ export interface X402AiGatewayOptions {
 	/** Model ids to expose, e.g. 'openai/gpt-oss-20b'. */
 	models?: readonly string[];
 	/** Hook for logging each paid turn. */
-	onTurn?: (info: { model: string; status: number; usage?: Record<string, unknown>; description: string }) => void;
+	onTurn?: (info: { model: string; status: number; ok: boolean; usage?: Record<string, unknown>; description: string; ids: Record<string, string>; durationMs: number; error?: string; finishReason?: string | null }) => void;
 }
 
 /**
@@ -122,6 +122,7 @@ export function createAiRunFetch(options: X402AiGatewayOptions): typeof fetch {
 		if (typeof model === 'string' && model.startsWith('openai/') && !('reasoning_effort' in rest)) rest.reasoning_effort = 'low';
 		// Thinking models (Qwen 3.8, Gemma 4, GLM 4.7) need room to think before the tool call.
 		if (!('max_tokens' in rest) && !('max_completion_tokens' in rest)) rest.max_tokens = 2048;
+		const started = Date.now();
 		const res = await options.paidFetch(aiRunUrl, {
 			method: 'POST',
 			headers: { authorization: `Bearer ${resolve(options.apiToken)}`, 'payment-method': 'x402', 'content-type': 'application/json' },
@@ -137,13 +138,13 @@ export function createAiRunFetch(options: X402AiGatewayOptions): typeof fetch {
 		}
 		if (!res.ok || !envelope?.success || !envelope.result) {
 			const message = (envelope?.errors?.map((e) => `${e.code ?? ''} ${e.message ?? ''}`.trim()).join('; ') || text.slice(0, 300) || res.statusText) + ` [cf-ray ${res.headers.get('cf-ray') ?? '-'}]`;
-			options.onTurn?.({ model: String(model), status: res.status, description: `failed: ${message} | ${options.paidFetch.describeLast()}` });
+			options.onTurn?.({ model: String(model), status: res.status, ok: false, description: `failed: ${message} | ${options.paidFetch.describeLast()}`, ids: idsOf(res), durationMs: Date.now() - started, error: message });
 			return new Response(JSON.stringify({ error: { message: `AI Gateway /ai/run ${res.status}: ${message}`, type: 'ai_gateway_error' } }), {
 				status: res.ok ? 502 : res.status,
 				headers: { 'content-type': 'application/json' },
 			});
 		}
-		options.onTurn?.({ model: String(model), status: res.status, usage: envelope.result.usage, description: options.paidFetch.describeLast() });
+		options.onTurn?.({ model: String(model), status: res.status, ok: true, usage: envelope.result.usage, description: options.paidFetch.describeLast(), ids: idsOf(res), durationMs: Date.now() - started, finishReason: envelope.result.choices?.[0]?.finish_reason ?? null });
 		return new Response(completionToSse(envelope.result), { status: 200, headers: { 'content-type': 'text/event-stream' } });
 	};
 }
@@ -185,4 +186,13 @@ export function createX402AiGatewayProvider(options: X402AiGatewayOptions) {
 		models,
 		api,
 	});
+}
+
+function idsOf(res: Response): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const h of ['cf-ray', 'cf-aig-request-id', 'cf-aig-event-id', 'cf-aig-trace-id', 'cf-aig-log-id', 'cf-auditlog-id']) {
+		const v = res.headers.get(h);
+		if (v) out[h] = v;
+	}
+	return out;
 }

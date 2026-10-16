@@ -5,7 +5,7 @@
 	"compatibility_flags": ["nodejs_compat"],
 	// Workers Traces shows each agent response as a trace with agent-level
 	// spans: https://flueframework.com/docs/guide/observability/#cloudflare
-	"observability": { "traces": { "enabled": true } },
+	"observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": true }, "traces": { "enabled": true } },
 	// Non-secret knobs. Secrets (account id, API token, wallet key) live in
 	// .dev.vars locally and `wrangler secret put` in production.
 	"vars": {
@@ -13,7 +13,8 @@
 		"JOKE_MODEL": "google/gemma-4-26b-a4b-it",
 		"MAX_USDC_PER_DATA_CALL": "0.01",
 		"MAX_USDC_PER_INFERENCE": "0.25",
-		"MAX_USDC_PER_ISOLATE": "5"
+		"MAX_USDC_PER_ISOLATE": "5",
+		"RUNNER_LOCATION_HINT": "wnam"
 	},
 	// public/ is served as static assets (the page); agent and API routes run
 	// on the Worker first.
@@ -24,8 +25,12 @@
 	// https://flueframework.com/docs/guide/cloudflare-target/#managing-migrations
 	"migrations": [
 		{ "tag": "v1", "new_sqlite_classes": ["FlueStockJokeAgent"] },
-		{ "tag": "v2", "renamed_classes": [{ "from": "FlueStockJokeAgent", "to": "FlueJokeAgent" }] }
+		{ "tag": "v2", "renamed_classes": [{ "from": "FlueStockJokeAgent", "to": "FlueJokeAgent" }] },
+		{ "tag": "v3", "new_sqlite_classes": ["JokeRunner"] }
 	],
+	// JokeRunner (src/cloudflare.ts) starts every conversation from a US-pinned
+	// Durable Object so AI Gateway machine payments (US-only) see a US "visitor".
+	"durable_objects": { "bindings": [{ "name": "JOKE_RUNNER", "class_name": "JokeRunner" }] },
 	// The page's feed and per-ticker cache. Apply migrations/ with
 	// `bunx wrangler d1 migrations apply x402-stock-jokes --remote` (and --local for dev).
 	"d1_databases": [{ "binding": "DB", "database_name": "x402-stock-jokes", "database_id": "79517cc1-da36-41eb-a82b-da3b9116a939", "migrations_dir": "migrations" }],

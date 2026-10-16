@@ -5,6 +5,8 @@ import { accessFor, insertJoke } from '../lib/db.ts';
 import { handoff } from '../lib/drafts.ts';
 import { config } from '../lib/env.ts';
 import { ledger } from '../lib/ledger.ts';
+import { conversationScope, logEvent } from '../lib/log.ts';
+import { whereAmI } from '../cloudflare.ts';
 import { searchStockNews } from '../tools/ceramic.ts';
 import { writeJoke } from '../tools/joke.ts';
 import { fetchStocktwitsSignals } from '../tools/stocktwits.ts';
@@ -24,8 +26,11 @@ export function Joke({ id }: { id: string }) {
 
 	// Attach every payment made during this response to the reply's metadata,
 	// and store the finished joke in D1 for the feed and the cache.
-	useAgentStart(() => {
+	useAgentStart(async () => {
 		marks.set(id, ledger.mark());
+		conversationScope.set(id);
+		const where = await whereAmI();
+		logEvent('gate', where.loc === 'US', { probe: 'agent', agentColo: where.colo, agentCountry: where.loc }, { conversationId: id, label: 'agent colo' });
 	});
 	useResponseStart(() => ({ ledgerMark: ledger.mark() }));
 	useResponseFinish(({ metadata }) => {
@@ -34,7 +39,9 @@ export function Joke({ id }: { id: string }) {
 		const authorized = payments.reduce((sum, p) => sum + Number(p.authorizedUsdc), 0);
 		return { payments, totalAuthorizedUsdc: authorized.toFixed(6) };
 	});
-	useAgentFinish(async ({ log }) => {
+	useAgentFinish(async ({ log, response }) => {
+		const failedTools = response.toolCalls.filter((t) => t.isError).map((t) => t.tool);
+		if (failedTools.length) logEvent('error', false, { where: 'agent-finish', failedTools, toolCalls: response.toolCalls.length }, { conversationId: id, label: 'tool failures' });
 		const draft = handoff.takeDraft(id);
 		if (!draft) return;
 		const payments = ledger.since(marks.get(id) ?? 0);

@@ -9,6 +9,7 @@
  */
 import { env } from 'cloudflare:workers';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { jwtPayload, logEvent } from './log.ts';
 
 export const PASSWORD_HEADER = 'x-joke-password';
 export const PAYMENT_CONTEXT_HEADER = 'payment-context';
@@ -27,31 +28,38 @@ function timingSafeEqual(a: string, b: string): boolean {
 	return diff === 0;
 }
 
-export async function checkAccess(request: Request): Promise<Access> {
+export async function checkAccess(request: Request, conversationId?: string): Promise<Access> {
 	const expected = (env as unknown as { JOKE_PASSWORD?: string }).JOKE_PASSWORD;
 	const url = new URL(request.url);
+	const cf = (request as Request & { cf?: { country?: string; colo?: string; asn?: number } }).cf;
+	const base = { path: url.pathname, host: url.host, visitorCountry: cf?.country ?? null, colo: cf?.colo ?? null, asn: cf?.asn ?? null, userAgent: request.headers.get('user-agent')?.slice(0, 120) ?? null };
+	const done = (access: Access, extra: Record<string, unknown> = {}) => {
+		logEvent('gate', access.ok, { ...base, ...extra, ...(access.ok ? { by: access.by, amount: access.amount ?? null } : { status: access.status, reason: access.reason }) }, { conversationId: conversationId ?? null, label: access.ok ? `admitted:${access.by}` : `denied:${access.status}` });
+		return access;
+	};
 	const given = request.headers.get(PASSWORD_HEADER) ?? url.searchParams.get('password');
 	if (given !== null) {
-		if (expected && timingSafeEqual(given, expected)) return { ok: true, by: 'password' };
-		return { ok: false, status: 401, reason: 'wrong coupon code; drop the X-Joke-Password header to pay 0.10 USDC with x402 instead' };
+		if (expected && timingSafeEqual(given, expected)) return done({ ok: true, by: 'password' });
+		return done({ ok: false, status: 401, reason: 'wrong coupon code; drop the X-Joke-Password header to pay 0.10 USDC with x402 instead' });
 	}
 
 	const token = request.headers.get(PAYMENT_CONTEXT_HEADER);
 	if (token) {
+		const claims = jwtPayload(token);
 		try {
 			jwks ??= createRemoteJWKSet(new URL(JWKS_URL));
-			const { payload } = await jwtVerify(token, jwks, { algorithms: ['EdDSA'] });
+			const { payload, protectedHeader } = await jwtVerify(token, jwks, { algorithms: ['EdDSA'] });
 			const aud = Array.isArray(payload.aud) ? payload.aud[0] : payload.aud;
 			if (aud && !aud.includes(url.host) && !aud.includes(PUBLIC_HOST)) {
-				return { ok: false, status: 401, reason: `payment context is for another resource (${aud})` };
+				return done({ ok: false, status: 401, reason: `payment context is for another resource (${aud})` }, { claims, kid: protectedHeader.kid ?? null });
 			}
-			return { ok: true, by: 'x402', amount: typeof payload.amount === 'string' ? payload.amount : undefined };
+			return done({ ok: true, by: 'x402', amount: typeof payload.amount === 'string' ? payload.amount : undefined }, { claims, kid: protectedHeader.kid ?? null });
 		} catch (err) {
-			return { ok: false, status: 401, reason: `payment context rejected: ${(err as Error).message}` };
+			return done({ ok: false, status: 401, reason: `payment context rejected: ${(err as Error).message}` }, { claims });
 		}
 	}
 
-	return { ok: false, status: 402, reason: 'x402 payment (0.10 USDC) or coupon code required' };
+	return done({ ok: false, status: 402, reason: 'x402 payment (0.10 USDC) or coupon code required' });
 }
 
 export function paymentRequiredBody(conversationUrl: string) {

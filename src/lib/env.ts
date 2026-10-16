@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { Budget, usdToBaseUnits } from './budget.ts';
 import { createPaidFetch } from './x402.ts';
 import { ledger } from './ledger.ts';
+import { logEvent } from './log.ts';
 
 interface Bindings {
 	CLOUDFLARE_ACCOUNT_ID: string;
@@ -14,12 +15,14 @@ interface Bindings {
 	ORCHESTRATOR_MODEL?: string;
 	JOKE_MODEL?: string;
 	ALCHEMY_API_KEY?: string;
+	RUNNER_LOCATION_HINT?: string;
+	JOKE_RUNNER?: DurableObjectNamespace;
 }
 
 // `env` from cloudflare:workers is live, so reads happen at call time, never at module load.
 const e = env as unknown as Bindings;
 
-function need(name: keyof Bindings): string {
+function need(name: 'CLOUDFLARE_ACCOUNT_ID' | 'CLOUDFLARE_API_TOKEN' | 'EVM_BASE_PRIVATE_KEY'): string {
 	const v = e[name];
 	if (!v) throw new Error(`Missing secret ${name}. Set it in .dev.vars (local) or with wrangler secret put (deployed).`);
 	return v;
@@ -51,6 +54,13 @@ export const config = {
 	get maxUsdPerIsolate() {
 		return e.MAX_USDC_PER_ISOLATE ?? '5';
 	},
+	get runnerLocationHint(): DurableObjectLocationHint {
+		return (e.RUNNER_LOCATION_HINT ?? 'wnam') as DurableObjectLocationHint;
+	},
+	get runner(): DurableObjectNamespace {
+		if (!e.JOKE_RUNNER) throw new Error('JOKE_RUNNER Durable Object binding is missing; check wrangler.jsonc');
+		return e.JOKE_RUNNER;
+	},
 	get alchemyKey() {
 		return e.ALCHEMY_API_KEY ?? null;
 	},
@@ -73,7 +83,9 @@ export function paidDataFetch(label: string) {
 		privateKey: () => config.privateKey,
 		budget: getBudgets().data,
 		maxUsdPerPayment: `$${config.maxUsdPerDataCall}`,
+		label,
 		onReceipt: (ev) => ledger.record(label, ev),
+		onEvent: (ev) => logEvent('x402.payment', ev.ok, ev as unknown as Record<string, unknown>, { label }),
 	});
 }
 
@@ -82,6 +94,8 @@ export function paidInferenceFetch(label: string) {
 		privateKey: () => config.privateKey,
 		budget: getBudgets().inference,
 		maxUsdPerPayment: `$${config.maxUsdPerInference}`,
+		label,
 		onReceipt: (ev) => ledger.record(label, ev),
+		onEvent: (ev) => logEvent('x402.payment', ev.ok, ev as unknown as Record<string, unknown>, { label }),
 	});
 }

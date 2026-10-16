@@ -218,6 +218,21 @@ Fixed price `$0.10` (`exact`), audience Everyone, receiving wallet = the app wal
 
 Verified 2026-10-16: an unpaid POST gets the gateway's 402 with a 0.10 USDC quote; `bun scripts/pay-for-joke.ts TSLA` from a second wallet paid it ([tx](https://basescan.org/tx/0x140f1cc2580e8a7771d6e55e5cd248715bc7ade6142549174c775df32634725c)), the Worker accepted the signed `PAYMENT-CONTEXT`, and the joke was stored with `paidBy: "x402"`. Paying from the app's own wallet is refused by the facilitator ("facilitator rejected verify request"), so use a different wallet to test.
 
+## Where the agent runs, and why it matters
+
+AI Gateway machine payments are US-only, and the check is made against the country of the Cloudflare datacenter that executes the request, which is chosen near whoever submitted the joke. A visitor whose traffic lands on a non-US colo would make every AI Gateway call fail with `403 disallowed visitor country`, even though the app's account and wallet are the payer. So every conversation is started by `JokeRunner` (`src/cloudflare.ts`), a Durable Object in the `us` jurisdiction (hard constraint; `RUNNER_LOCATION_HINT` picks the coast): the agent's own Durable Object is placed next to it, in the US, and all its paid calls leave from there. The 202 response and the `gate` events record the runner's and the agent's colo so this can be verified. Full write-up and bug report: [docs/ai-gateway-visitor-country.md](./docs/ai-gateway-visitor-country.md).
+
+## Logging and reporting gateway bugs
+
+Every gateway interaction is logged as one JSON line (Workers Logs) and stored in the D1 `events` table:
+
+- `x402.payment`: one per paid call, with every HTTP attempt (the 402 quote with its `cloudflare-quote` JWT claims, the `PAYMENT-SIGNATURE` we sent minus the signature bytes, the final status, the decoded `PAYMENT-RESPONSE`), the upstream ids (`cf-ray`, `cf-aig-request-id`, `cf-aig-event-id`, `cf-aig-trace-id`, `cf-auditlog-id`), payer, amounts, and timings.
+- `gate`: each admission or denial with visitor country/colo, the verified `PAYMENT-CONTEXT` claims and key id for x402 payers, plus the runner's and agent's colo probes.
+- `ai.turn`: each orchestrator model turn with usage, finish reason and ids.
+- `error`: tool failures at agent finish.
+
+Read them with `GET /api/events?conversation=<id>`, `?failures=1`, `?kind=x402.payment`, `?since=<iso>`, or live with `bunx wrangler tail x402-stock-jokes --format json`. To report a bug to Cloudflare, send the event JSON for the conversation: it has the `cf-ray` and `cf-aig-*` ids, the quote `jti`, the payer address, the tx hash and the exact timestamps. `GET /api/_trace` shows what a subrequest from the Worker looks like to Cloudflare-fronted endpoints.
+
 ## The page
 
 `public/index.html`, no framework. You enter a ticker, nothing else. The 402 card then offers two paths: copy the agent instructions (your agent pays 0.10 USDC with x402), or type a coupon code for a free joke; a working coupon is remembered in the browser. The run shows each of the three steps and the agent's turns with receipt chips, then the joke and the facts behind it. Below: a live feed of every joke ever made (polled from D1 every 3 s), counters, and a jokes-per-hour sparkline.
@@ -299,7 +314,9 @@ bunx wrangler secret bulk secrets.json --name x402-stock-jokes
 ## What's inside
 
 ```
-src/app.ts                     routes: the access gate, /joke/<TICKER> + /joke/<id> (simple API), /agents/joke, /api/jokes, /api/stats, /api/transfers, /api/wallet; registers the x402 provider
+src/app.ts                     routes: the access gate, /joke/<TICKER> + /joke/<id> (simple API), /agents/joke, /api/jokes, /api/stats, /api/transfers, /api/events, /api/_trace, /api/wallet; registers the x402 provider
+src/cloudflare.ts              JokeRunner: us-jurisdiction Durable Object that starts every conversation
+src/lib/log.ts                 structured events (Workers Logs + D1), upstream id extraction
 src/agents/joke.ts             Joke: the Flue agent, its model and tools, payment metadata on every reply, D1 write on finish
 src/tools/stocktwits.ts        step 1 (paid symbols/show + free stream → price, bull/bear counts, sample posts)
 src/tools/ceramic.ts           step 2 (paid search → headlines)
@@ -327,7 +344,7 @@ Cost per joke: about 0.002 USDC for data plus a few thousandths of a USDC settle
 - **Base RPC rate limits.** Public Base RPCs return 429 to Cloudflare's edge under light load; `/api/wallet` rotates through several and falls back to address-only. Set `BASE_RPC_URL` for the scripts if `mainnet.base.org` throttles you locally.
 - **Reply format drift.** The orchestrator sometimes writes `Based:` instead of `Based on:`; the page accepts both. The D1 row uses the facts passed to `write_joke`, not the reply text.
 - **`cf workers secrets bulk` did not set secrets** in this session (it reported success, then `secrets list` was empty); see [docs/cf-secrets-bulk-bug.md](./docs/cf-secrets-bulk-bug.md). `wrangler secret bulk` works.
-- **Intermittent `503 facilitator verify returned 403` from AI Gateway.** Seen a few times a day on a fresh `upto` authorization, with plenty of balance and allowance; the same request succeeds seconds later. `write_joke` retries once after 4 s, and the agent is told to retry a failed step at most once.
+- **`503 facilitator verify returned 403` / `403 disallowed visitor country` from AI Gateway** were the geo check described above, not flakiness; the runner fixes them. `write_joke` still retries once on a 5xx.
 - **Only `write_joke` may produce the joke.** The agent is told it cannot write jokes itself and may call a tool at most twice per reply; an earlier version retried a failing joke call seven times.
 - **Only one hostname.** Adding the custom domain turned off the `workers.dev` route (requests there get Cloudflare error 1042). Everything, including the password path, goes through `jokes.papper.me`.
 - **Admission is recorded in D1**, not in memory: the HTTP gate and the agent's Durable Object are different isolates, so `access` rows carry `paid_by` across.

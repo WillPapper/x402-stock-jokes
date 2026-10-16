@@ -10,6 +10,7 @@ import { jokeStats, latestJokeFor, listJokes, recordAccess, type JokeRow } from 
 import { amountsByHash, summarize, walletTransfers, type Transfer } from './lib/transfers.ts';
 import { config, paidInferenceFetch } from './lib/env.ts';
 import { ledger } from './lib/ledger.ts';
+import { listEvents, logEvent } from './lib/log.ts';
 import { PERMIT2, USDC_BASE, walletFromKey } from './lib/x402.ts';
 
 // The agent's own model turns go through AI Gateway machine payments: every
@@ -19,7 +20,7 @@ setProvider(
 		accountId: () => config.accountId,
 		apiToken: () => config.apiToken,
 		paidFetch: paidInferenceFetch('AI Gateway orchestrator turn'),
-		onTurn: (t) => console.log(`[x402-ai-gateway] ${t.model} ${t.status} ${t.description}`),
+		onTurn: (t) => logEvent('ai.turn', t.ok, { model: t.model, status: t.status, usage: t.usage ?? null, ids: t.ids, durationMs: t.durationMs, finishReason: t.finishReason ?? null, payment: t.description, ...(t.error ? { error: t.error } : {}) }, { label: 'orchestrator turn' }),
 	}),
 );
 
@@ -29,7 +30,8 @@ const app = new Hono();
 // either the password or a Monetization Gateway payment. Reads stay free.
 app.use('/agents/joke/:id', async (c, next) => {
 	if (c.req.method !== 'POST') return next();
-	const access = await checkAccess(c.req.raw);
+	const id = c.req.param('id');
+	const access = await checkAccess(c.req.raw, id);
 	if (!access.ok) {
 		if (access.status === 402) {
 			const ticker = await tickerFromBody(c.req.raw);
@@ -39,10 +41,22 @@ app.use('/agents/joke/:id', async (c, next) => {
 		return c.json({ error: 'unauthorized', message: access.reason }, 401);
 	}
 	// The agent runs in a Durable Object (another isolate), so hand this over through D1.
-	const cf = (c.req.raw as Request & { cf?: { country?: string; colo?: string } }).cf;
-	console.log(`[gate] ${c.req.param('id')} by=${access.by} visitor=${cf?.country ?? '?'} colo=${cf?.colo ?? '?'}`);
-	await recordAccess(c.req.param('id'), access.by, access.amount).catch((err) => console.warn('recordAccess failed', (err as Error).message));
-	return next();
+	await recordAccess(id, access.by, access.amount).catch((err) => console.warn('recordAccess failed', (err as Error).message));
+
+	// Start the conversation from the US-pinned runner, not from this request's colo:
+	// AI Gateway machine payments geolocate the Worker's egress and are US-only.
+	let message: { kind?: string; body?: string };
+	try {
+		message = (await c.req.json()) as typeof message;
+	} catch {
+		return c.json({ error: 'bad_request', message: 'JSON body {"kind":"user","body":"…"} required' }, 400);
+	}
+	if (typeof message.body !== 'string' || !message.body.trim()) return c.json({ error: 'bad_request', message: 'body must be a non-empty string' }, 400);
+	// `us` jurisdiction is a hard constraint (execution + storage in the US); the hint only picks the coast.
+	const us = config.runner.jurisdiction('us');
+	const runner = us.get(us.idFromName('us-runner'), { locationHint: config.runnerLocationHint });
+	const started = await (runner as unknown as { submit(req: { id: string; body: string; by: 'password' | 'x402' }): Promise<{ submissionId: string; runnerColo: string | null; runnerCountry: string | null }> }).submit({ id, body: message.body, by: access.by });
+	return c.json({ streamUrl: new URL(c.req.url).origin + `/agents/joke/${id}`, submissionId: started.submissionId, runner: { colo: started.runnerColo, country: started.runnerCountry } }, 202);
 });
 
 // Talk to Joke with one POST per message, then GET the same URL to read:
@@ -191,6 +205,44 @@ app.get('/api/wallet', async (c) => {
 });
 
 app.get('/api/ledger', (c) => c.json({ payments: ledger.all() }));
+
+// Diagnostic: how do Cloudflare-fronted endpoints see a subrequest made from this
+// Worker while handling YOUR request? Compares your visitor identity with what
+// cdn-cgi/trace and AI Gateway's unpaid 402/403 see from inside the Worker.
+app.get('/api/_trace', async (c) => {
+	const cf = (c.req.raw as Request & { cf?: { country?: string; colo?: string; asn?: number } }).cf;
+	const visitor = { ip: c.req.header('cf-connecting-ip') ?? null, country: cf?.country ?? null, colo: cf?.colo ?? null, asn: cf?.asn ?? null };
+	const trace = Object.fromEntries((await (await fetch('https://www.cloudflare.com/cdn-cgi/trace')).text()).trim().split('\n').map((l) => l.split('=') as [string, string]));
+	const probe = await fetch(config.aiRunUrl, {
+		method: 'POST',
+		headers: { authorization: `Bearer ${config.apiToken}`, 'payment-method': 'x402', 'content-type': 'application/json' },
+		body: JSON.stringify({ model: config.orchestratorModel, input: { messages: [{ role: 'user', content: 'ping' }], max_tokens: 4 } }),
+	});
+	const result = {
+		visitor,
+		subrequestSeenBy: { cloudflareTrace: { ip: trace.ip, loc: trace.loc, colo: trace.colo } },
+		aiGatewayUnpaidProbe: { status: probe.status, cfRay: probe.headers.get('cf-ray'), body: probe.status === 402 ? '402 quote (ok)' : (await probe.text()).slice(0, 200) },
+		verdict:
+			trace.ip && visitor.ip && trace.ip === visitor.ip
+				? 'the subrequest carried YOUR IP: Cloudflare-fronted endpoints geolocate the visitor, not the Worker'
+				: 'the subrequest carried a Cloudflare egress IP',
+	};
+	logEvent('gate', probe.status === 402, { probe: 'trace', ...result }, { label: 'trace probe' });
+	return c.json(result);
+});
+
+// Structured gateway events for bug reports: ?conversation=…&kind=x402.payment|gate|ai.turn&failures=1&since=<iso>&limit=100
+app.get('/api/events', async (c) =>
+	c.json({
+		events: await listEvents({
+			limit: Number(c.req.query('limit') ?? 100),
+			conversationId: c.req.query('conversation') || undefined,
+			kind: c.req.query('kind') || undefined,
+			failuresOnly: c.req.query('failures') === '1',
+			since: c.req.query('since') || undefined,
+		}),
+	}),
+);
 
 async function tickerFromBody(req: Request): Promise<string | null> {
 	try {

@@ -59,6 +59,36 @@ export interface ReceiptEvent extends PaidResult {
 	scheme: string | null;
 }
 
+/** One HTTP round trip inside a paid call, as seen on the wire. */
+export interface PaymentAttempt {
+	status: number;
+	durationMs: number;
+	/** Cloudflare identifiers from the response (cf-ray, cf-aig-*, …). */
+	ids: Record<string, string>;
+	/** Decoded PAYMENT-REQUIRED on a 402 (the quote, or the rejection reason). */
+	paymentRequired?: { error?: string; accepts?: PaymentQuote[]; quote?: Record<string, unknown> | null } | null;
+	/** Summary of the PAYMENT-SIGNATURE we sent on this attempt, if any. */
+	signature?: Record<string, unknown> | null;
+	/** Decoded PAYMENT-RESPONSE, if any. */
+	paymentResponse?: Receipt | null;
+	bodySnippet?: string;
+}
+
+export interface PaymentEvent {
+	label: string;
+	url: string;
+	method: string;
+	ok: boolean;
+	finalStatus: number;
+	scheme: string | null;
+	authorizedUsdc: string | null;
+	settled: boolean;
+	payer: string;
+	attempts: PaymentAttempt[];
+	totalMs: number;
+	error?: string;
+}
+
 export interface PaidFetchOptions {
 	/** The wallet key, or a getter resolved on first use (so secrets are read lazily). */
 	privateKey: `0x${string}` | (() => `0x${string}`);
@@ -66,6 +96,9 @@ export interface PaidFetchOptions {
 	/** Dollar cap handed to the x402 client as a second line of defence, e.g. "$0.10". */
 	maxUsdPerPayment: string;
 	onReceipt?: (event: ReceiptEvent) => void;
+	/** Detailed per-call record for logs and bug reports. */
+	onEvent?: (event: PaymentEvent) => void;
+	label?: string;
 }
 
 function decodeBase64Json<T>(header: string | null): T | null {
@@ -146,20 +179,60 @@ export function createPaidFetch(options: PaidFetchOptions) {
 			],
 			spendControls: { maxAmountPerPayment: options.maxUsdPerPayment },
 		});
-		return (paying = wrapFetchWithPayment(fetch, client) as unknown as typeof paying);
+		return (paying = wrapFetchWithPayment(observedFetch as typeof fetch, client) as unknown as typeof paying);
+	};
+
+	let attempts: PaymentAttempt[] = [];
+	const observedFetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+		const started = Date.now();
+		const res = await fetch(input as string, init);
+		const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+		const sig = headers.get('PAYMENT-SIGNATURE');
+		const pr = res.status === 402 ? decodePaymentRequired(res.headers.get('PAYMENT-REQUIRED')) : null;
+		const quoteToken = (pr?.extensions as { 'cloudflare-quote'?: { info?: { quoteToken?: string } } } | undefined)?.['cloudflare-quote']?.info?.quoteToken;
+		const attempt: PaymentAttempt = {
+			status: res.status,
+			durationMs: Date.now() - started,
+			ids: upstreamIdsOf(res),
+			paymentRequired: pr ? { error: pr.error, accepts: pr.accepts, quote: quoteToken ? jwtPayloadOf(quoteToken) : null } : null,
+			signature: sig ? summarizeSignature(sig) : null,
+			paymentResponse: decodeReceipt(res.headers.get('PAYMENT-RESPONSE')),
+		};
+		if (!res.ok && res.status !== 402) attempt.bodySnippet = (await res.clone().text()).slice(0, 300);
+		attempts.push(attempt);
+		return res;
 	};
 
 	let last: PaidResult = { authorized: null, receipt: null, settled: false };
 
 	async function paidFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
 		pending = null;
+		attempts = [];
+		const started = Date.now();
 		const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+		const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+		const emit = (ok: boolean, finalStatus: number, error?: string) =>
+			options.onEvent?.({
+				label: options.label ?? url,
+				url,
+				method,
+				ok,
+				finalStatus,
+				scheme: attempts.find((a) => a.paymentRequired?.accepts?.[0])?.paymentRequired?.accepts?.[0]?.scheme ?? null,
+				authorizedUsdc: pending === null ? null : formatUsdc(pending),
+				settled: last.settled,
+				payer: account().address,
+				attempts,
+				totalMs: Date.now() - started,
+				...(error ? { error } : {}),
+			});
 		let res: Response;
 		try {
 			res = await fetchWithPayment()!(input as string, init);
 		} catch (err) {
 			if (pending !== null) budget.release(pending);
 			last = { authorized: pending, receipt: null, settled: false };
+			emit(false, attempts.at(-1)?.status ?? 0, (err as Error).message);
 			throw err;
 		}
 		const receipt = decodeReceipt(res.headers.get('PAYMENT-RESPONSE'));
@@ -171,6 +244,7 @@ export function createPaidFetch(options: PaidFetchOptions) {
 		}
 		last = { authorized, receipt, settled };
 		options.onReceipt?.({ ...last, url, scheme: receipt ? (receipt.scheme as string | undefined) ?? null : null });
+		emit(res.ok, res.status, res.ok ? undefined : `HTTP ${res.status}${attempts.at(-1)?.paymentRequired?.error ? ': ' + attempts.at(-1)!.paymentRequired!.error : ''}`);
 		return res;
 	}
 
@@ -183,4 +257,38 @@ export function createPaidFetch(options: PaidFetchOptions) {
 				? 'no payment'
 				: `${last.settled ? 'paid' : 'authorized (not settled)'} ${formatUsdc(last.authorized)} USDC${basescanTx(last.receipt) ? ' ' + basescanTx(last.receipt) : ''}`,
 	});
+}
+
+function upstreamIdsOf(res: Response): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const h of ['cf-ray', 'cf-aig-request-id', 'cf-aig-event-id', 'cf-aig-trace-id', 'cf-aig-log-id', 'cf-auditlog-id', 'api-version', 'x-request-id', 'date']) {
+		const v = res.headers.get(h);
+		if (v) out[h] = v;
+	}
+	return out;
+}
+
+function jwtPayloadOf(token: string): Record<string, unknown> | null {
+	try {
+		const part = token.split('.')[1] ?? '';
+		return JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/').padEnd(part.length + ((4 - (part.length % 4)) % 4), '='))) as Record<string, unknown>;
+	} catch {
+		return null;
+	}
+}
+
+/** The PAYMENT-SIGNATURE we sent, minus the signature bytes: enough to trace a payment on the seller side. */
+function summarizeSignature(header: string): Record<string, unknown> | null {
+	const p = decodeBase64Json<{ x402Version?: number; accepted?: PaymentQuote; payload?: { authorization?: Record<string, unknown>; permit2Authorization?: Record<string, unknown>; signature?: string } }>(header);
+	if (!p) return null;
+	const auth = p.payload?.authorization ?? p.payload?.permit2Authorization ?? null;
+	return {
+		x402Version: p.x402Version,
+		scheme: p.accepted?.scheme,
+		network: p.accepted?.network,
+		amount: p.accepted?.amount,
+		payTo: p.accepted?.payTo,
+		authorization: auth,
+		signatureLength: p.payload?.signature?.length ?? 0,
+	};
 }
