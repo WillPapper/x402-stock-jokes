@@ -36,7 +36,7 @@ Extending the repro to Durable Objects shows the same identity propagating furth
 | 19:47 | US laptop | 14 consecutive paid `/ai/run` calls, all `200` | — |
 | 20:37–20:39 | Canada, work started from an alarm, no client requests during the run | all payments `200` from ORD | — |
 
-The verify-time variant of the same check appears as `503 {"error":"service_unavailable","message":"facilitator verify returned 403"}`; it occurred only in runs touched by a non-US client.
+The same check can also fire later in the flow. When the unpaid request receives a `402` quote but the retry carrying `PAYMENT-SIGNATURE` is rejected at facilitator verification, the error is `503 {"error":"service_unavailable","message":"facilitator verify returned 403"}`. We saw this only in runs where a non-US client request was active by the time the retry was verified; it never occurred in US-only runs, and it stopped once no non-US client could reach the paying object. A `503` with no mention of country makes this hard to diagnose.
 
 ## Why this matters
 
