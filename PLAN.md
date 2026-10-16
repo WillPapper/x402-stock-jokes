@@ -39,7 +39,12 @@ Verified live today unless marked otherwise.
 - Eligible models: `z-ai/glm-4.7-flash`, `google/gemma-4-26b-a4b-it`, `openai/gpt-oss-20b`, `alibaba/qwen3.8-27b`.
 - Flow: 402 → wallet signs an authorization for the *maximum* → retry with `PAYMENT-SIGNATURE` → actual token cost deducted.
 - Account is confirmed eligible (Monetization Gateway active). **No fallbacks.**
-- Not verified yet (needs the account token): the `/ai/run` response envelope, whether `input.tools` works for tool calling, whether `/ai/run` streams, and whether the OpenAI-compatible `/ai/v1/chat/completions` path also accepts `Payment-Method: x402`. These are the Step 0 spike.
+- **Verified 2026-10-16 with the real token** (`x402-stock-jokes`, permissions Workers AI Read + AI Gateway Run, created via `cf user tokens create`, stored in `.dev.vars`):
+  - Unpaid `POST /ai/run` with `Payment-Method: x402` → **402** with a standard x402 v2 `PAYMENT-REQUIRED` header. The token scope is sufficient (a scope problem would be 401/403).
+  - The quote uses **scheme `upto`, not `exact`**: `amount` is a ceiling (25606 base units ≈ $0.0256 for `max_tokens: 20` on `openai/gpt-oss-20b`, priced as if the full 128k-token context were used) and the actual token cost is settled. The quote carries `extra.facilitatorAddress` and a `cloudflare-quote` JWT (valid 120 s) plus `cloudflare-model-provider` extensions.
+  - `upto` on EVM is **Permit2-based** (`permitWitnessTransferFrom`), so the wallet needs a one-time on-chain `USDC.approve(Permit2)` on Base. The 402 advertises neither `eip2612GasSponsoring` nor `erc20ApprovalGasSponsoring`, so the approval is a direct transaction: **the wallet needs a little ETH on Base for that one tx** (cents). After that, payments are gasless signatures like `exact`.
+  - The OpenAI-compatible `/ai/v1/chat/completions` path also answers 402 with the same price, but with a non-standard JSON body and **no `PAYMENT-REQUIRED` header**, so the x402 client cannot drive it. The provider shim must translate chat-completions requests into the `/ai/run` envelope.
+  - Still unverified (needs the funded, approved wallet): the `/ai/run` success envelope, `input.tools` for tool calling, streaming.
 
 ### Flue 2.3.0 and how its model layer can pay with x402 (from reading the installed packages)
 - Flue agents call models through `@earendil-works/pi-ai`. pi-ai's `ProviderRequestOptions` accepts `fetch?: FetchFunction` and `headers?`, and the `openai-completions` adapter passes both into the OpenAI SDK client it builds (`dist/api/openai-completions.js`, `createClient(model, ctx, apiKey, options.headers, options.fetch, ...)`). The adapter always requests `stream: true`.
@@ -78,7 +83,7 @@ wrangler.jsonc / vite.config.ts / flue.config.ts / .dev.vars.example / bun.lock 
 Design decisions:
 - **Everything the model does is x402-paid.** The orchestrator provider pays per turn through AI Gateway machine payments. Step 3 stays a separate `write_joke` tool so the joke call has its own prompt, model, cap and receipt.
 - **Three tools, fixed order via the instructions.** Each is `durable: true`; every paid request lives inside `step.do(...)`. Tool outputs carry `{ data, paid, tx }`.
-- **One x402 client, two spend caps.** Data calls capped at $0.01 per payment; inference calls capped separately (value set from what AI Gateway actually quotes in the spike). The guard wraps `signTypedData`, so an over-cap payment is refused before it is signed. Per-conversation total in `usePersistentState`.
+- **One x402 client, both EVM schemes, two spend caps.** Register `ExactEvmScheme` (StockTwits, Ceramic) and `UptoEvmScheme` (AI Gateway) on `eip155:8453`. Data calls capped at $0.01 per payment; inference authorizations capped at $0.10 (AI Gateway quotes a ceiling against the full context window; the settled cost is far lower). The guard wraps `signTypedData`, so an over-cap payment is refused before it is signed. Per-conversation total in `usePersistentState`.
 - **Receipts are first-class.** `PAYMENT-RESPONSE` decoded to `https://basescan.org/tx/<hash>` for tools and for orchestrator turns, shown in the reply and on the page.
 - **Trust the 402 quote**, never hardcoded `payTo` or `amount`; caps are the only client-side constants.
 
@@ -86,9 +91,9 @@ Design decisions:
 
 Commit after each step; push at the end of each step.
 
-0. **Spike (needs account id + token in `.dev.vars`).** A Bun script that, with a funded wallet: (a) sends a paid `/ai/run` request to `openai/gpt-oss-20b` and records the response envelope; (b) repeats with `input.tools` to confirm tool calling; (c) tries `stream: true`; (d) tries `/ai/v1/chat/completions` with `Payment-Method: x402`. Outcome decides the provider shim: if (d) pays, the provider's `baseUrl` is `.../ai/v1` and no translation is needed; otherwise the paid fetch rewrites chat-completions requests into the `/ai/run` envelope and, if `/ai/run` does not stream, converts the completed result into a one-chunk SSE stream for the adapter. Record findings in PLAN.md section 2.
+0. **Spike — partly done (token verified, quote decoded; see section 2).** Remaining, once the wallet holds USDC + a little ETH and the Permit2 approval is mined: (a) a paid `/ai/run` call to `openai/gpt-oss-20b`, record the success envelope and the settled amount from `PAYMENT-RESPONSE`; (b) repeat with `input.tools` to confirm tool calling; (c) try `stream: true`. (d) is settled: `/ai/v1/chat/completions` is not x402-drivable, so the paid fetch rewrites chat-completions requests into the `/ai/run` envelope and, if `/ai/run` does not stream, converts the completed result into a one-chunk SSE stream for the adapter.
 1. **Scaffold — done (commit d8d4252).** Flue skeleton merged, agent `StockJoke` at `src/agents/joker.ts`, mounted at `/agents/joker`, x402 packages installed. Remaining: switch the lockfile to Bun (`rm package-lock.json && bun install`), add `@earendil-works/pi-ai` as a direct dependency for the provider shim, and replace the keyless `cloudflare/...` model with the x402 provider in step 4.
-2. **Wallet + doctor scripts.**
+2. **Wallet + doctor + approve scripts.** `wallet-new` (key), `doctor` (USDC + ETH balances on Base, the three 402 quotes, Permit2 allowance), `approve-permit2` (one-time `USDC.approve(Permit2, max)` sent from the wallet, needs a few cents of ETH on Base).
 3. **`lib/x402.ts`, `lib/budget.ts`, `lib/ledger.ts`** with `bun test` coverage for budget math and receipt decoding. Use `atob`, not `Buffer`.
 4. **`lib/ai-gateway-provider.ts`** per the spike; register in `app.ts`; smoke-test one agent turn locally under `vite dev` and confirm a receipt.
 5. **Step 1 tool `fetch_stocktwits_signals(symbol)`**: paid `symbols/trending` + paid `symbols/show` → `{ title, exchange, sector, industry, trending, trendingSummary, watchlistCount, lastUpdated }`. Handle 402-after-payment (decode `error`), 403 geo, 429.
@@ -106,9 +111,9 @@ Commit after each step; push at the end of each step.
 | `EVM_PRIVATE_KEY` | `.dev.vars` / `wrangler secret` | dedicated wallet, holds only a few USDC on Base |
 | `CLOUDFLARE_ACCOUNT_ID` | `.dev.vars` / `wrangler secret` | AI Gateway `/ai/run` URL |
 | `CLOUDFLARE_API_TOKEN` | `.dev.vars` / `wrangler secret` | required alongside `Payment-Method: x402` |
-| `MAX_USDC_PER_DATA_CALL` (`0.01`), `MAX_USDC_PER_INFERENCE` (from spike), `MAX_USDC_PER_JOKE` (`0.10`), `ORCHESTRATOR_MODEL`, `JOKE_MODEL` | `vars` in wrangler.jsonc | caps and model overrides |
+| `MAX_USDC_PER_DATA_CALL` (`0.01`), `MAX_USDC_PER_INFERENCE` (`0.10`, authorization ceiling), `MAX_USDC_PER_JOKE` (`0.25`, authorized total), `ORCHESTRATOR_MODEL`, `JOKE_MODEL` | `vars` in wrangler.jsonc | caps and model overrides |
 
-Expected cost per joke: 0.002 (StockTwits) + 0.001 (Ceramic) + 3–4 orchestrator turns + 1 joke call on sub-cent open models ≈ **$0.005–0.03**, dominated by inference.
+Expected cost per joke: 0.002 (StockTwits) + 0.001 (Ceramic) + 3–4 orchestrator turns + 1 joke call on sub-cent open models ≈ **$0.005–0.03** settled, dominated by inference. Note the `upto` authorizations are ceilings: the wallet must hold at least the ceiling of each in-flight call (≈ $0.03–0.10) even though far less is charged.
 
 ## 6. Review decisions (2026-10-15)
 
