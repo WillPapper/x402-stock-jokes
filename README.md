@@ -105,6 +105,16 @@ Models: the orchestrator is `alibaba/qwen3.8-27b` (best multi-step tool use of t
 
 Cost per joke: about 0.002 USDC for data plus a few thousandths of a USDC settled for inference. AI Gateway quotes a *ceiling* per call against the model's full context window (about 0.13 USDC per Qwen turn, 0.026 per Gemma call), so the wallet must hold roughly 0.5 USDC of headroom even though far less is charged.
 
+## Operational notes
+
+- **Wallet headroom.** AI Gateway's `upto` quotes are ceilings against the full context window: about 0.13 USDC per Qwen turn and 0.026 per Gemma call, so one joke reserves roughly 0.55 USDC in flight while a few thousandths settle. Keep at least 1 USDC in the wallet or the facilitator refuses with `verify returned 403`.
+- **Settlement is invisible per call.** AI Gateway returns no `PAYMENT-RESPONSE` receipt; the only confirmation is the wallet balance going down (`/api/wallet`, or `bun run doctor`).
+- **Secrets are read lazily on purpose.** Workers validate the module at upload time before any secret exists, so nothing in `src/lib/env.ts` or `src/lib/x402.ts` touches a secret at import. Keep it that way when adding code, or `wrangler deploy` fails with error 10021.
+- **Base RPC rate limits.** Public Base RPCs return 429 to Cloudflare's edge under light load; `/api/wallet` rotates through several and falls back to address-only. Set `BASE_RPC_URL` for the scripts if `mainnet.base.org` throttles you locally.
+- **Reply format drift.** The orchestrator sometimes writes `Based:` instead of `Based on:`; the page accepts both. A structured-output step would make this strict.
+- **`cf workers secrets bulk` did not set secrets** in this session (it reported success, then `secrets list` was empty); see [docs/cf-secrets-bulk-bug.md](./docs/cf-secrets-bulk-bug.md). `wrangler secret bulk` works.
+- **Only `write_joke` may produce the joke.** The agent is told it cannot write jokes itself and may call a tool at most twice per reply; an earlier version retried a failing joke call seven times.
+
 ## Caveats
 
 - StockTwits' x402 preview serves only `GET /api/2/symbols/show/{SYM}.json`; the price and sentiment numbers come from the free `streams/symbol` endpoint on the same gateway. The preview is staging, geo-fenced, and has no SLA.
