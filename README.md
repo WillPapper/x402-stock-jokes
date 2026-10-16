@@ -36,9 +36,9 @@ flowchart TB
   subgraph cf["Cloudflare, jokes.papper.me"]
     mgw["Monetization Gateway<br/>seller rule: POST /joke/* or /agents/joke/*<br/>without X-Joke-Password answers 402<br/>0.10 USDC, exact, paid to the app wallet"]
     subgraph worker["Worker: x402-stock-jokes, src/app.ts (visitor's colo)"]
-      hono["Hono app<br/>gate: coupon header or PAYMENT-CONTEXT JWT<br/>POST /joke/:ticker, POST /agents/joke/:id<br/>GET /joke/:id, /api/*"]
+      hono["Hono app<br/>gate: coupon header or PAYMENT-CONTEXT JWT<br/>POST /joke/:ticker, POST /agents/joke/:id<br/>GET /joke/:id, GET /agents/joke/:id<br/>/api/jokes, /api/stats, /api/events, /api/wallet"]
     end
-    runner["JokeRunner, src/cloudflare.ts<br/>Durable Object, us jurisdiction<br/>submit() queues, alarm() dispatches"]
+    runner["JokeRunner, src/cloudflare.ts<br/>Durable Object, us jurisdiction<br/>submit() queues, alarm() dispatches<br/>retries a failed dispatch up to 3 times"]
     subgraph flue["Flue runtime, placed next to the runner (US)"]
       direction TB
       do["Durable Object FlueJokeAgent<br/>agent Joke, src/agents/joke.ts<br/>one per conversation id"]
@@ -88,6 +88,7 @@ flowchart TB
   d1 -.-|"same events"| logs
   do -->|"useAgentFinish: insertJoke<br/>joke, facts, payments, steps, paidBy"| d1
   d1 -->|"GET /joke/:id builds status<br/>from events + jokes, never from the agent"| hono
+  hono -.->|"GET /agents/joke/:id only once done:<br/>the stored conversation (until then, D1 status)"| do
   paid -->|"exact"| st
   paid -->|"exact"| ceramic
   paid -->|"upto"| aigw
@@ -121,7 +122,7 @@ sequenceDiagram
   Note over W: checkAccess: coupon header, or verify the JWT<br/>against payments.cloudflare.com/certs
   W->>D: recordAccess(id, paidBy)
   W->>R: submit({ id, body, by })
-  Note over R: storage.put(pending:id), setAlarm(now + 3 s)
+  Note over R: storage.put(pending:id), setAlarm(now + 3 s)<br/>(re-armed every 5 s while anything is pending, 3 attempts max)
   R-->>W: queued
   W-->>B: 202 { id, poll: /joke/<id> }
 
@@ -170,7 +171,7 @@ sequenceDiagram
     W->>D: events for id + jokes row
     W-->>B: { done, outcome, steps, payments, joke, basedOn }
   end
-  Note over W,A: the agent's object is never read while it runs:<br/>a read would lend the reader's country to the next payment
+  Note over W,A: the agent's object is never read while it runs:<br/>a read would lend the reader's country to the next payment.<br/>Once done, GET /agents/joke/<id> serves the stored conversation.
 ```
 
 ### Flow of funds
