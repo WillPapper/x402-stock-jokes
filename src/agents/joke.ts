@@ -1,24 +1,32 @@
 'use agent';
-import { useModel, useResponseFinish, useResponseStart, useTool } from '@flue/runtime';
+import { useAgentFinish, useAgentStart, useModel, useResponseFinish, useResponseStart, useTool } from '@flue/runtime';
+import { X402_PROVIDER_ID } from '../lib/ai-gateway-provider.ts';
+import { insertJoke } from '../lib/db.ts';
+import { handoff } from '../lib/drafts.ts';
 import { config } from '../lib/env.ts';
 import { ledger } from '../lib/ledger.ts';
-import { X402_PROVIDER_ID } from '../lib/ai-gateway-provider.ts';
 import { searchStockNews } from '../tools/ceramic.ts';
 import { writeJoke } from '../tools/joke.ts';
 import { fetchStocktwitsSignals } from '../tools/stocktwits.ts';
 
-// StockJoke is the agent's durable identity: it names the generated Durable
-// Object class (FlueStockJokeAgent) and the migration entry in wrangler.jsonc.
-export function StockJoke() {
+const marks = new Map<string, number>();
+
+// Joke is the agent's durable identity: it names the generated Durable Object
+// class (FlueJokeAgent) and the migration entry in wrangler.jsonc.
+export function Joke({ id }: { id: string }) {
 	// Every turn of this model is itself paid with x402 through AI Gateway
 	// machine payments (see src/lib/ai-gateway-provider.ts, registered in app.ts).
 	useModel(`${X402_PROVIDER_ID}/${config.orchestratorModel}`);
 
 	useTool(fetchStocktwitsSignals);
 	useTool(searchStockNews);
-	useTool(writeJoke);
+	useTool(writeJoke(id));
 
-	// Attach every payment made during this response to the reply's metadata.
+	// Attach every payment made during this response to the reply's metadata,
+	// and store the finished joke in D1 for the feed and the cache.
+	useAgentStart(() => {
+		marks.set(id, ledger.mark());
+	});
 	useResponseStart(() => ({ ledgerMark: ledger.mark() }));
 	useResponseFinish(({ metadata }) => {
 		const mark = typeof (metadata as { ledgerMark?: unknown })?.ledgerMark === 'number' ? (metadata as { ledgerMark: number }).ledgerMark : 0;
@@ -26,9 +34,33 @@ export function StockJoke() {
 		const authorized = payments.reduce((sum, p) => sum + Number(p.authorizedUsdc), 0);
 		return { payments, totalAuthorizedUsdc: authorized.toFixed(6) };
 	});
+	useAgentFinish(async ({ log }) => {
+		const draft = handoff.takeDraft(id);
+		if (!draft) return;
+		const payments = ledger.since(marks.get(id) ?? 0);
+		marks.delete(id);
+		const total = payments.reduce((sum, p) => sum + Number(p.authorizedUsdc), 0).toFixed(6);
+		try {
+			const row = await insertJoke({
+				conversationId: id,
+				ticker: draft.symbol,
+				title: handoff.title(draft.symbol),
+				joke: draft.joke,
+				facts: draft.facts,
+				payments,
+				totalAuthorizedUsdc: total,
+				orchestratorModel: config.orchestratorModel,
+				jokeModel: draft.model,
+				paidBy: handoff.takeAccess(id),
+			});
+			log.info(`stored joke ${row.id} for ${row.ticker} (${payments.length} payments, ${total} USDC authorized)`);
+		} catch (err) {
+			log.error(`failed to store joke: ${(err as Error).message}`);
+		}
+	});
 
 	return [
-		'You are StockJoke, a tool-driven agent. You do NOT write jokes yourself: the only joke you may ever output is the exact text returned by the write_joke tool.',
+		'You are Joke, a tool-driven agent. You do NOT write jokes yourself: the only joke you may ever output is the exact text returned by the write_joke tool.',
 		'Every data point you mention must come from a tool result, and every tool call is a USDC micro-payment (x402) that the user is happy to make.',
 		'',
 		'When the user names a ticker, run these three steps in order, every time:',

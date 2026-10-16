@@ -3,6 +3,7 @@ import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { asJson } from '../lib/json.ts';
 import { config, paidInferenceFetch } from '../lib/env.ts';
+import { handoff } from '../lib/drafts.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 
 export interface JokeResult {
@@ -59,7 +60,9 @@ export async function writeJokeFor(symbol: string, facts: string[], model = conf
 	return { joke, model, usage: body.result?.usage ?? null, payments: ledger.since(mark) };
 }
 
-export const writeJoke = defineTool({
+/** The tool is created per conversation so the finished joke can be handed to the agent's finish hook. */
+export const writeJoke = (conversationId: string) =>
+	defineTool({
 	name: 'write_joke',
 	description:
 		'Step 3. Pay Cloudflare AI Gateway (x402 machine payments, USDC on Base) to generate the joke from the facts gathered in steps 1 and 2. Pass 3 to 8 short factual bullet points. Call this last, exactly once; if it fails, report the failure instead of calling it again.',
@@ -70,7 +73,8 @@ export const writeJoke = defineTool({
 	durable: true,
 	async run({ data, step, log }) {
 		const result = await step.do(`joke:${data.symbol.toUpperCase()}`, () => writeJokeFor(data.symbol.toUpperCase(), data.facts));
+		handoff.setDraft(conversationId, { symbol: data.symbol.toUpperCase(), facts: data.facts, joke: result.joke, model: result.model });
 		log.info(`Joke from ${result.model}: ${result.joke.slice(0, 80)}…`);
 		return { output: asJson(result) };
 	},
-});
+	});

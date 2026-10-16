@@ -13,6 +13,7 @@ import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { asJson } from '../lib/json.ts';
 import { paidDataFetch } from '../lib/env.ts';
+import { handoff } from '../lib/drafts.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 import { decodePaymentRequired } from '../lib/x402.ts';
 
@@ -79,6 +80,7 @@ export async function fetchStocktwitsSignalsFor(symbol: string): Promise<Stocktw
 	const showRes = await paid(`${STOCKTWITS_GATEWAY}/api/2/symbols/show/${sym}.json`);
 	if (!showRes.ok) throw new Error(`StockTwits symbol lookup for ${sym} failed: ${await describeFailure(showRes)}`);
 	const show = (await showRes.json()) as ShowResponse;
+	if (show.symbol?.title) handoff.setTitle(sym, show.symbol.title);
 
 	const streamRes = await paid(`${STOCKTWITS_GATEWAY}/api/2/streams/symbol/${sym}.json`);
 	const stream: StreamResponse = streamRes.ok ? ((await streamRes.json()) as StreamResponse) : {};

@@ -3,8 +3,11 @@ import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import { createPublicClient, erc20Abi, fallback, formatUnits, http } from 'viem';
 import { base } from 'viem/chains';
-import { StockJoke } from './agents/joker.ts';
+import { Joke } from './agents/joke.ts';
+import { PRICE_USDC, checkAccess, paymentRequiredBody } from './lib/access.ts';
 import { createX402AiGatewayProvider } from './lib/ai-gateway-provider.ts';
+import { jokeStats, latestJokeFor, listJokes } from './lib/db.ts';
+import { handoff } from './lib/drafts.ts';
 import { config, paidInferenceFetch } from './lib/env.ts';
 import { ledger } from './lib/ledger.ts';
 import { PERMIT2, USDC_BASE, walletFromKey } from './lib/x402.ts';
@@ -22,15 +25,46 @@ setProvider(
 
 const app = new Hono();
 
-// Talk to StockJoke with one POST per message, then GET the same URL to read:
-//
-//   curl -X POST http://localhost:5173/agents/joker/demo-1 \
-//     -H 'content-type: application/json' \
-//     -d '{"kind":"user","body":"Tell me a joke about NVDA."}'
-//   curl http://localhost:5173/agents/joker/demo-1
-app.route('/agents/joker', createAgentRouter(StockJoke));
+// Submitting a message costs money (every step pays with x402), so a POST needs
+// either the password or a Monetization Gateway payment. Reads stay free.
+app.use('/agents/joke/:id', async (c, next) => {
+	if (c.req.method !== 'POST') return next();
+	const access = await checkAccess(c.req.raw);
+	if (!access.ok) {
+		if (access.status === 402) {
+			const ticker = await tickerFromBody(c.req.raw);
+			const cached = ticker ? await latestJokeFor(ticker).catch(() => null) : null;
+			return c.json({ ...paymentRequiredBody(c.req.url), cached }, 402);
+		}
+		return c.json({ error: 'unauthorized', message: access.reason }, 401);
+	}
+	handoff.setAccess(c.req.param('id'), access.by);
+	return next();
+});
 
-app.get('/api/health', (c) => c.json({ ok: true }));
+// Talk to Joke with one POST per message, then GET the same URL to read:
+//
+//   curl -X POST https://jokes.papper.me/agents/joke/demo-1 \
+//     -H 'content-type: application/json' -H 'x-joke-password: …' \
+//     -d '{"kind":"user","body":"Tell me a joke about NVDA."}'
+//   curl https://jokes.papper.me/agents/joke/demo-1
+app.route('/agents/joke', createAgentRouter(Joke));
+
+app.get('/api/health', (c) => c.json({ ok: true, price: `${PRICE_USDC} USDC` }));
+
+// Feed, cache and stats from D1.
+app.get('/api/jokes', async (c) => {
+	const after = c.req.query('after') || undefined;
+	const limit = Number(c.req.query('limit') ?? 30);
+	return c.json({ jokes: await listJokes({ after, limit }), serverTime: new Date().toISOString() });
+});
+app.get('/api/jokes/latest', async (c) => {
+	const ticker = (c.req.query('ticker') ?? '').toUpperCase().replace(/[^A-Z0-9.]/g, '');
+	if (!ticker) return c.json({ error: 'ticker query parameter required' }, 400);
+	const joke = await latestJokeFor(ticker);
+	return joke ? c.json({ joke }) : c.json({ joke: null }, 404);
+});
+app.get('/api/stats', async (c) => c.json(await jokeStats()));
 
 // Public Base RPCs rate-limit Cloudflare's edge; try several and degrade to
 // "address only" rather than failing the page.
@@ -52,5 +86,16 @@ app.get('/api/wallet', async (c) => {
 });
 
 app.get('/api/ledger', (c) => c.json({ payments: ledger.all() }));
+
+async function tickerFromBody(req: Request): Promise<string | null> {
+	try {
+		const body = (await req.clone().json()) as { body?: unknown };
+		const m = typeof body.body === 'string' ? body.body.toUpperCase().match(/\b[A-Z]{1,6}(?:\.[A-Z])?\b/g) : null;
+		const stop = new Set(['A', 'I', 'ME', 'THE', 'JOKE', 'ABOUT', 'TELL', 'PLEASE', 'STOCK', 'FOR', 'ON', 'OF', 'AN', 'TO', 'AND', 'WRITE', 'MAKE', 'GIVE']);
+		return m?.find((t) => !stop.has(t)) ?? null;
+	} catch {
+		return null;
+	}
+}
 
 export default app;

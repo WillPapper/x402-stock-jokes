@@ -22,5 +22,14 @@
 	// (StockJoke -> FlueStockJokeAgent), and Cloudflare requires a migration
 	// entry for each one. Append a new tag when you add an agent:
 	// https://flueframework.com/docs/guide/cloudflare-target/#managing-migrations
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["FlueStockJokeAgent"] }]
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["FlueStockJokeAgent"] },
+		{ "tag": "v2", "renamed_classes": [{ "from": "FlueStockJokeAgent", "to": "FlueJokeAgent" }] }
+	],
+	// The page's feed and per-ticker cache. Apply migrations/ with
+	// `bunx wrangler d1 migrations apply x402-stock-jokes --remote` (and --local for dev).
+	"d1_databases": [{ "binding": "DB", "database_name": "x402-stock-jokes", "database_id": "79517cc1-da36-41eb-a82b-da3b9116a939", "migrations_dir": "migrations" }],
+	// Public hostname, fronted by Cloudflare's Monetization Gateway (seller rule
+	// charges 0.10 USDC for POST /agents/joke/* without the password header).
+	"routes": [{ "pattern": "jokes.papper.me", "custom_domain": true }]
 }

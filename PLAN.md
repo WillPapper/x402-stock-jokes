@@ -1,6 +1,6 @@
 # x402 Stock Jokes — Implementation Plan
 
-Status: **built, deployed and verified in production, 2026-10-16** at https://x402-stock-jokes.papper.workers.dev. All steps done. Section 8 records what changed during implementation.
+Status: **built, deployed and verified in production, 2026-10-16** at https://jokes.papper.me (also reachable at x402-stock-jokes.papper.workers.dev, where only the password path works because the Monetization Gateway fronts the custom domain only). Section 8 records what changed during implementation.
 
 ## 1. Goal
 
@@ -9,7 +9,7 @@ A Flue agent on Cloudflare Workers that, given a ticker, produces a joke about t
 ```
 user: "tell me a joke about NVDA"           (HTML page or curl)
   │
-  │  Flue agent StockJoke — its own model turns run on AI Gateway /ai/run, paid with x402
+  │  Flue agent Joke — its own model turns run on AI Gateway /ai/run, paid with x402
   │
   ├─ Step 1  StockTwits (x402, Cloudflare Monetization Gateway)  → symbol details + "why it's trending"
   ├─ Step 2  Ceramic search (x402, Cloudflare Monetization Gateway) → recent news headlines
@@ -60,8 +60,8 @@ Node 26.2, **Bun** (chosen), no global wrangler (use `bunx`). The scaffold commi
 
 ```
 src/
-  app.ts                     Hono app: setProvider(x402AiGatewayProvider), mount /agents/joker, GET /api/health, GET /api/wallet
-  agents/joker.ts            'use agent' — StockJoke: useModel('x402-ai-gateway/openai/gpt-oss-20b'), useTool x3,
+  app.ts                     Hono app: setProvider(x402AiGatewayProvider), mount /agents/joke, GET /api/health, GET /api/wallet
+  agents/joker.ts            'use agent' — Joke: useModel('x402-ai-gateway/openai/gpt-oss-20b'), useTool x3,
                              usePersistentState spend ledger, useResponseFinish receipts, ordered instructions
   tools/stocktwits.ts        fetch_stocktwits_signals  (durable; 2 paid calls: trending + show)
   tools/ceramic.ts           search_stock_news         (durable; 1 paid call)
@@ -92,7 +92,7 @@ Design decisions:
 Commit after each step; push at the end of each step.
 
 0. **Spike — partly done (token verified, quote decoded; see section 2).** Remaining, once the wallet holds USDC + a little ETH and the Permit2 approval is mined: (a) a paid `/ai/run` call to `openai/gpt-oss-20b`, record the success envelope and the settled amount from `PAYMENT-RESPONSE`; (b) repeat with `input.tools` to confirm tool calling; (c) try `stream: true`. (d) is settled: `/ai/v1/chat/completions` is not x402-drivable, so the paid fetch rewrites chat-completions requests into the `/ai/run` envelope and, if `/ai/run` does not stream, converts the completed result into a one-chunk SSE stream for the adapter.
-1. **Scaffold — done (commit d8d4252).** Flue skeleton merged, agent `StockJoke` at `src/agents/joker.ts`, mounted at `/agents/joker`, x402 packages installed. Remaining: switch the lockfile to Bun (`rm package-lock.json && bun install`), add `@earendil-works/pi-ai` as a direct dependency for the provider shim, and replace the keyless `cloudflare/...` model with the x402 provider in step 4.
+1. **Scaffold — done (commit d8d4252).** Flue skeleton merged, agent `Joke` at `src/agents/joke.ts`, mounted at `/agents/joke`, x402 packages installed. Remaining: switch the lockfile to Bun (`rm package-lock.json && bun install`), add `@earendil-works/pi-ai` as a direct dependency for the provider shim, and replace the keyless `cloudflare/...` model with the x402 provider in step 4.
 2. **Wallet + doctor + approve scripts.** `wallet-new` (key), `doctor` (USDC + ETH balances on Base, the three 402 quotes, Permit2 allowance), `approve-permit2` (one-time `USDC.approve(Permit2, max)` sent from the wallet, needs a few cents of ETH on Base).
 3. **`lib/x402.ts`, `lib/budget.ts`, `lib/ledger.ts`** with `bun test` coverage for budget math and receipt decoding. Use `atob`, not `Buffer`.
 4. **`lib/ai-gateway-provider.ts`** per the spike; register in `app.ts`; smoke-test one agent turn locally under `vite dev` and confirm a receipt.
@@ -101,19 +101,27 @@ Commit after each step; push at the end of each step.
 7. **Step 3 tool `write_joke(context)`**: paid `/ai/run` with `z-ai/glm-4.7-flash` (configurable), prompt: one joke ≤ 60 words, must reference a real datapoint, no financial advice.
 8. **Agent wiring**: instructions enforce 1→2→3 and the reply format (joke, "based on" block, receipts, total spent); spend ledger; `useResponseFinish` metadata with orchestrator receipts.
 9. **`public/index.html` + `app.ts` routes + wrangler assets** (`run_worker_first: ["/agents/*", "/api/*"]`), observability on.
-10. **Local e2e** with ~$1 USDC: `curl -X POST .../agents/joker/demo -d '{"kind":"user","body":"joke about AAPL"}'`, read with `GET`, then the page. Fix whatever real responses break.
+10. **Local e2e** with ~$1 USDC: `curl -X POST .../agents/joke/demo -d '{"kind":"user","body":"joke about AAPL"}'`, read with `GET`, then the page. Fix whatever real responses break.
 11. **Deploy**: `wrangler secret put` ×3, `bunx vite build`, `bunx wrangler deploy`, smoke test. README: setup, funding, cost per joke, curl examples.
 
 ## 5. Secrets and config
 
+Secrets (the keys below are exactly the ones in `.dev.vars`; values never appear in the repo):
+
 | Name | Where | Purpose |
 |---|---|---|
-| `EVM_PRIVATE_KEY` | `.dev.vars` / `wrangler secret` | dedicated wallet, holds only a few USDC on Base |
 | `CLOUDFLARE_ACCOUNT_ID` | `.dev.vars` / `wrangler secret` | AI Gateway `/ai/run` URL |
-| `CLOUDFLARE_API_TOKEN` | `.dev.vars` / `wrangler secret` | required alongside `Payment-Method: x402` |
-| `MAX_USDC_PER_DATA_CALL` (`0.01`), `MAX_USDC_PER_INFERENCE` (`0.10`, authorization ceiling), `MAX_USDC_PER_JOKE` (`0.25`, authorized total), `ORCHESTRATOR_MODEL`, `JOKE_MODEL` | `vars` in wrangler.jsonc | caps and model overrides |
+| `CLOUDFLARE_API_TOKEN` | `.dev.vars` / `wrangler secret` | Workers AI Read (+ AI Gateway Run); sent alongside `Payment-Method: x402` |
+| `EVM_BASE_ADDRESS` | `.dev.vars` / `wrangler secret` | the app wallet address (Base mainnet), also the Monetization Gateway receiving wallet |
+| `EVM_BASE_PRIVATE_KEY` | `.dev.vars` / `wrangler secret` | the app wallet key; holds a few USDC plus a little ETH for the one-time Permit2 approval |
+| `JOKE_PASSWORD` | `.dev.vars` / `wrangler secret` | lets a caller POST a joke without paying (header `X-Joke-Password`) |
+| `BASE_RPC_URL` | `.dev.vars` (optional) | scripts only: RPC for balance checks and the Permit2 approval |
 
-Expected cost per joke: 0.002 (StockTwits) + 0.001 (Ceramic) + 3–4 orchestrator turns + 1 joke call on sub-cent open models ≈ **$0.005–0.03** settled, dominated by inference. Note the `upto` authorizations are ceilings: the wallet must hold at least the ceiling of each in-flight call (≈ $0.03–0.10) even though far less is charged.
+Non-secret settings live in `wrangler.jsonc` `vars` (`ORCHESTRATOR_MODEL`, `JOKE_MODEL`, `MAX_USDC_PER_DATA_CALL` 0.01, `MAX_USDC_PER_INFERENCE` 0.25, `MAX_USDC_PER_ISOLATE` 5) and are documented in the README. The scripts read them from `wrangler.jsonc` too.
+
+Deploy (Bun): `bunx wrangler login`, `bun run db:migrate`, `bun run deploy`, then `bunx wrangler secret bulk secrets.json --name x402-stock-jokes` for the secrets above.
+
+Expected cost per joke: 0.002 (StockTwits) + 0.001 (Ceramic) + 3–4 orchestrator turns + 1 joke call on sub-cent open models ≈ **$0.005–0.03** settled, dominated by inference. `upto` authorizations are ceilings (≈ 0.13 USDC per Qwen turn), so the wallet must hold about 0.5 USDC of headroom per joke in flight. A joke submitted without the password earns the app **0.10 USDC** through the Monetization Gateway.
 
 ## 6. Review decisions (2026-10-15)
 
@@ -142,3 +150,12 @@ Expected cost per joke: 0.002 (StockTwits) + 0.001 (Ceramic) + 3–4 orchestrato
 - **Deploy:** Workers validate the module at upload time before secrets exist, so every secret read (wallet key, account id, token, even the x402 client construction) is lazy. `cf deploy` cannot handle the Flue/Vite output; `wrangler deploy` + `wrangler secret bulk` are used. Public Base RPCs rate-limit the edge, so `/api/wallet` tries several and degrades to address-only.
 - **Tooling bug found:** `cf workers secrets bulk` (cf 1.0.0-beta.17) returned success but set no secrets; the bulk endpoint has no request-body schema in `cf schema`. Repro and hypotheses in `docs/cf-secrets-bulk-bug.md`. Secrets were uploaded with `wrangler secret bulk` instead.
 - **Operational notes** (wallet headroom, lazy secrets, RPC rate limits, reply-format drift) are in the README so they survive this plan.
+
+## 9. Second iteration (2026-10-16, after review)
+
+- **Agent renamed** from StockJoke/joker to `Joke`: file `src/agents/joke.ts`, route `/agents/joke`, Durable Object class `FlueJokeAgent` via a `renamed_classes` migration (v2) so deployed conversations survive.
+- **Access gate** (`src/lib/access.ts`): a POST needs the `X-Joke-Password` header (secret `JOKE_PASSWORD`) or a Monetization Gateway `PAYMENT-CONTEXT` JWT (Ed25519, JWKS at payments.cloudflare.com/certs, verified with `jose`). Otherwise 402 with instructions and the cached joke for that ticker. Reads are free.
+- **The app is an x402 seller** on `jokes.papper.me` (Workers custom domain on the `papper.me` zone) via Monetization Gateway: fixed 0.10 USDC, `exact`, POST `/agents/joke/*`, exempt when the password header matches; receiving wallet = the app wallet. The rule is configured in the dashboard (the API's `cf monetization rules update` needs the zone onboarded with accepted terms first; it returned 404 "payment rule not found" before that). Rejected alternatives: in-Worker x402 server (the public x402.org facilitator supports only testnets for EVM; mainnet needs Coinbase CDP keys).
+- **D1** (`x402-stock-jokes`, binding `DB`, `migrations/0001_jokes.sql`): every finished joke with facts, payments, models and `paid_by`. Written from the agent's `useAgentFinish` hook using a per-conversation hand-off from the `write_joke` tool (created per render so it knows the conversation id). Durable Objects per joke were considered and rejected as overkill; the agent DO already holds the conversation.
+- **Page**: password field (remembered in localStorage), per-step receipt chips, paywall card with x402 snippet + cached joke, live feed (polls `/api/jokes?after=` every 3 s), counters and a per-hour sparkline from `/api/stats`.
+- **Bun everywhere** in docs and scripts: `bunx wrangler …`, `bun run db:migrate`, `bun run deploy`.

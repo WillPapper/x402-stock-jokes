@@ -10,6 +10,8 @@ This is a [Flue](https://flueframework.com) project: agents are TypeScript funct
 - `wrangler.jsonc` — Worker config; every agent needs a Durable Object migration entry.
 - `src/lib/` — x402 client, budget, ledger, and the pi-ai provider that pays AI Gateway for the agent's own turns.
 - `src/tools/` — the three paid steps (StockTwits, Ceramic, AI Gateway joke).
+- `src/lib/access.ts` — who may POST a joke: password header, or a Monetization Gateway `PAYMENT-CONTEXT` JWT; `src/lib/db.ts` — D1 feed/cache; `public/index.html` — the page.
+- The agent is `Joke` (`src/agents/joke.ts`, Durable Object class `FlueJokeAgent`, mounted at `/agents/joke`).
 - Every tool call and model turn spends real USDC; keep caps in `wrangler.jsonc` vars small and run `bun run doctor` first.
 
 ## Commands
@@ -18,8 +20,9 @@ This is a [Flue](https://flueframework.com) project: agents are TypeScript funct
 - `bun run deploy` — build and deploy the Worker.
 - `bun run check:types` — typecheck; `bun test` — unit tests.
 - `bun run doctor` — check wallet, allowance and the live 402 quotes before spending.
-- `npx flue docs search <query>` — search the Flue docs from the terminal (then `flue docs read <path>`).
-- `npx flue add` — list blueprints for adding channels, sandboxes, and databases.
+- `bun run db:migrate` / `bun run db:migrate:local` — apply D1 migrations (migrations/).
+- `bunx flue docs search <query>` — search the Flue docs from the terminal (then `bunx flue docs read <path>`).
+- `bunx flue add` — list blueprints for adding channels, sandboxes, and databases.
 
 ## Cloudflare CLI
 

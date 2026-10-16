@@ -6,21 +6,24 @@
 <title>Stock Jokes</title>
 <meta name="description" content="A Flue agent that pays StockTwits, Ceramic and Cloudflare AI Gateway per request with USDC on Base (x402) to write one joke about a stock.">
 <style>
-  :root { --bg:#f6f4ee; --fg:#1d1c1a; --muted:#6b675f; --card:#ffffff; --line:#e4e0d6; --accent:#0d6b5e; --accent-fg:#ffffff; --ok:#1a7f4b; --warn:#a15c00; --err:#b3261e; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; } }
-  :root[data-theme="dark"] { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; }
+  :root { --bg:#f6f4ee; --fg:#1d1c1a; --muted:#6b675f; --card:#ffffff; --line:#e4e0d6; --accent:#0d6b5e; --accent-fg:#ffffff; --ok:#1a7f4b; --warn:#a15c00; --err:#b3261e; --chip:#eef4f2; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; --chip:#242a28; } }
+  :root[data-theme="dark"] { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; --chip:#242a28; }
   * { box-sizing:border-box }
   body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
-  main { max-width:720px; margin:0 auto; padding:40px 16px 64px; }
+  main { max-width:760px; margin:0 auto; padding:36px 16px 64px; }
   h1 { font-size:28px; margin:0 0 4px; letter-spacing:-0.01em }
-  .sub { color:var(--muted); margin:0 0 28px }
-  form { display:flex; gap:8px; margin-bottom:24px }
-  input { flex:1; font:inherit; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); text-transform:uppercase; min-width:0 }
+  h2 { font-size:17px; margin:28px 0 10px }
+  .sub { color:var(--muted); margin:0 0 22px }
+  form { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; margin-bottom:20px }
+  @media (max-width:560px) { form { grid-template-columns:1fr } }
+  input { font:inherit; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); min-width:0 }
+  input#ticker { text-transform:uppercase }
   button { font:inherit; font-weight:600; padding:12px 18px; border:0; border-radius:10px; background:var(--accent); color:var(--accent-fg); cursor:pointer }
   button:disabled { opacity:.55; cursor:default }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin-bottom:16px }
-  .steps { list-style:none; padding:0; margin:0; display:grid; gap:10px }
-  .steps li { display:grid; grid-template-columns:28px 1fr; gap:10px; align-items:start }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin-bottom:14px }
+  .steps { list-style:none; padding:0; margin:0; display:grid; gap:12px }
+  .steps li { display:grid; grid-template-columns:26px 1fr auto; gap:10px; align-items:start }
   .dot { width:22px; height:22px; border-radius:50%; border:2px solid var(--line); display:grid; place-items:center; font-size:12px; margin-top:2px }
   .dot.running { border-color:var(--warn); animation:pulse 1s infinite }
   .dot.done { border-color:var(--ok); background:var(--ok); color:#fff }
@@ -28,35 +31,49 @@
   @keyframes pulse { 50% { opacity:.4 } }
   .step-title { font-weight:600 }
   .step-detail { color:var(--muted); font-size:14px; word-break:break-word }
+  .chip { display:inline-block; font:12px/1 var(--mono); padding:6px 8px; border-radius:999px; background:var(--chip); color:var(--fg); white-space:nowrap; margin-top:4px }
+  .chip a { color:var(--accent); text-decoration:none }
   .joke { font-size:22px; line-height:1.35; margin:0 0 12px; white-space:pre-wrap }
   .based { color:var(--muted); font-size:15px; margin:0 }
-  table { width:100%; border-collapse:collapse; font-size:14px }
-  th, td { text-align:left; padding:8px 6px; border-top:1px solid var(--line); vertical-align:top }
-  th { color:var(--muted); font-weight:500; border-top:0 }
-  td.num, th.num { text-align:right; font-family:var(--mono); white-space:nowrap }
-  a { color:var(--accent) }
   .err { color:var(--err); white-space:pre-wrap }
   .hidden { display:none }
   footer { color:var(--muted); font-size:13px; margin-top:24px }
-  code { font-family:var(--mono); font-size:13px }
+  code, pre { font-family:var(--mono); font-size:13px }
+  pre { background:var(--chip); padding:12px; border-radius:10px; overflow:auto; margin:10px 0 0 }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px }
+  .stat b { display:block; font-size:22px }
+  .stat span { color:var(--muted); font-size:13px }
+  .spark { width:100%; height:48px; display:block; margin-top:6px }
+  .feed { display:grid; gap:10px }
+  .feed .card { margin:0; animation:none }
+  .feed .card.new { animation:pop .6s ease-out }
+  @keyframes pop { from { transform:translateY(-6px); box-shadow:0 0 0 3px var(--accent) } to { transform:none } }
+  .meta { display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:13px; margin-bottom:6px }
+  .ticker { font-weight:700; color:var(--fg) }
+  .feed .joke { font-size:17px }
+  .receipts { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px }
+  .pay { border-color:var(--warn) }
+  .muted { color:var(--muted) }
 </style>
 </head>
 <body>
 <main>
   <h1>Stock Jokes</h1>
-  <p class="sub">One joke per ticker. Every step is an x402 micro-payment in USDC on Base: StockTwits for the chatter, Ceramic for the news, Cloudflare AI Gateway for the punchline, and the agent's own turns.</p>
+  <p class="sub">One joke per ticker. Every step is an x402 micro-payment in USDC on Base: StockTwits for the chatter, Ceramic for the news, Cloudflare AI Gateway for the punchline and for the agent's own turns.</p>
 
   <form id="form">
     <input id="ticker" placeholder="Ticker, e.g. NVDA" maxlength="12" autocomplete="off" required>
+    <input id="password" type="password" placeholder="Password (or pay 0.10 USDC)" autocomplete="off">
     <button id="go" type="submit">Tell me a joke</button>
   </form>
 
-  <section class="card">
+  <section class="card" id="run">
     <ol class="steps" id="steps">
-      <li><span class="dot" data-step="orchestrator"></span><div><div class="step-title">Agent thinks (AI Gateway, x402)</div><div class="step-detail">Waiting for a ticker.</div></div></li>
-      <li><span class="dot" data-step="fetch_stocktwits_signals"></span><div><div class="step-title">1. StockTwits chatter (x402)</div><div class="step-detail"></div></div></li>
-      <li><span class="dot" data-step="search_stock_news"></span><div><div class="step-title">2. Ceramic news search (x402)</div><div class="step-detail"></div></div></li>
-      <li><span class="dot" data-step="write_joke"></span><div><div class="step-title">3. Joke from AI Gateway (x402)</div><div class="step-detail"></div></div></li>
+      <li><span class="dot" data-step="orchestrator"></span><div><div class="step-title">Agent thinks (AI Gateway, x402)</div><div class="step-detail">Waiting for a ticker.</div></div><div class="receipt"></div></li>
+      <li><span class="dot" data-step="fetch_stocktwits_signals"></span><div><div class="step-title">1. StockTwits chatter (x402)</div><div class="step-detail"></div></div><div class="receipt"></div></li>
+      <li><span class="dot" data-step="search_stock_news"></span><div><div class="step-title">2. Ceramic news search (x402)</div><div class="step-detail"></div></div><div class="receipt"></div></li>
+      <li><span class="dot" data-step="write_joke"></span><div><div class="step-title">3. Joke from AI Gateway (x402)</div><div class="step-detail"></div></div><div class="receipt"></div></li>
     </ol>
   </section>
 
@@ -66,14 +83,25 @@
     <p class="err hidden" id="error"></p>
   </section>
 
-  <section class="card hidden" id="payments">
-    <table>
-      <thead><tr><th>Payment</th><th>Scheme</th><th class="num">USDC</th><th>Receipt</th></tr></thead>
-      <tbody id="rows"></tbody>
-      <tfoot><tr><th>Total authorized</th><th></th><th class="num" id="total"></th><th></th></tr></tfoot>
-    </table>
-    <p class="step-detail" style="margin:10px 0 0">"upto" rows are ceilings authorized to AI Gateway; the settled cost is usually well under a cent. "exact" rows settle on Base immediately.</p>
+  <section class="card pay hidden" id="paywall">
+    <div class="step-title">Payment required</div>
+    <p class="step-detail" id="paytext"></p>
+    <pre id="paycurl"></pre>
+    <div id="cachedwrap" class="hidden">
+      <p class="muted" style="margin:14px 0 4px">Meanwhile, the latest cached joke for <span id="cachedticker"></span>:</p>
+      <p class="joke" id="cachedjoke" style="font-size:18px"></p>
+      <div class="receipts" id="cachedreceipts"></div>
+    </div>
   </section>
+
+  <h2>Live feed</h2>
+  <div class="stats">
+    <div class="stat"><b id="s-count">–</b><span>jokes so far</span></div>
+    <div class="stat"><b id="s-tickers">–</b><span>tickers</span></div>
+    <div class="stat"><b id="s-usdc">–</b><span>USDC authorized</span></div>
+  </div>
+  <div class="card"><div class="step-detail">Jokes per hour, last 24h</div><svg class="spark" id="spark" viewBox="0 0 240 48" preserveAspectRatio="none" aria-label="jokes per hour"></svg></div>
+  <div class="feed" id="feed"><p class="muted" id="feedempty">No jokes yet.</p></div>
 
   <footer id="wallet">Loading wallet…</footer>
 </main>
@@ -81,42 +109,55 @@
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
-  const form = $('#form'), input = $('#ticker'), go = $('#go');
+  const form = $('#form'), ticker = $('#ticker'), password = $('#password'), go = $('#go');
   const dots = Object.fromEntries([...document.querySelectorAll('.dot')].map((d) => [d.dataset.step, d]));
+  const money = (x) => Number(x || 0).toFixed(4);
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const PUBLIC = 'https://jokes.papper.me';
   let timer = null;
+
+  try { password.value = localStorage.getItem('joke-password') || ''; } catch {}
+  password.addEventListener('change', () => { try { localStorage.setItem('joke-password', password.value); } catch {} });
 
   fetch('/api/wallet').then((r) => r.json()).then((w) => {
     $('#wallet').innerHTML = `Paying from <a href="${w.basescan}" target="_blank" rel="noopener">${w.address.slice(0, 6)}…${w.address.slice(-4)}</a> on Base${w.usdc != null ? ` · ${Number(w.usdc).toFixed(3)} USDC left` : ''}${w.permit2Approved === false ? ' · <span class="err">Permit2 not approved</span>' : ''}`;
   }).catch(() => { $('#wallet').textContent = 'Wallet status unavailable.'; });
 
-  function setStep(name, state, detail) {
+  // ---- current run ----
+  function receiptChip(p) {
+    if (!p) return '';
+    const amt = money(p.authorizedUsdc) + ' USDC';
+    return p.tx ? `<span class="chip"><a href="${p.tx}" target="_blank" rel="noopener">${amt} ↗</a></span>` : `<span class="chip" title="upto scheme: ceiling authorized, actual cost settled by AI Gateway">≤ ${amt}</span>`;
+  }
+  function setStep(name, state, detail, receiptHtml) {
     const dot = dots[name]; if (!dot) return;
     dot.className = 'dot ' + state;
     dot.textContent = state === 'done' ? '✓' : state === 'error' ? '!' : '';
     if (detail !== undefined) dot.parentElement.querySelector('.step-detail').textContent = detail;
+    if (receiptHtml !== undefined) dot.parentElement.querySelector('.receipt').innerHTML = receiptHtml;
   }
   function reset() {
-    for (const k of Object.keys(dots)) setStep(k, '', '');
+    for (const k of Object.keys(dots)) setStep(k, '', '', '');
     setStep('orchestrator', 'running', 'Sending your request…');
-    $('#result').classList.add('hidden'); $('#payments').classList.add('hidden'); $('#error').classList.add('hidden');
-    $('#joke').textContent = ''; $('#based').textContent = ''; $('#rows').innerHTML = '';
+    for (const id of ['result', 'paywall', 'error', 'cachedwrap']) $('#' + id).classList.add('hidden');
+    $('#joke').textContent = ''; $('#based').textContent = '';
   }
-  function money(x) { return Number(x).toFixed(6); }
-
   function render(snapshot) {
-    let joke = '', based = '', payments = [], total = null, failed = null;
+    let joke = '', based = '', payments = [], failed = null;
     for (const m of snapshot.messages || []) {
+      if (m.metadata && Array.isArray(m.metadata.payments)) payments = m.metadata.payments;
       for (const p of m.parts || []) {
         if (p.type === 'dynamic-tool') {
           const out = p.output || {};
+          const pay = (out.payments || [])[0];
           if (p.state === 'output-available') {
             let d = '';
             if (p.toolName === 'fetch_stocktwits_signals') d = `${out.title || out.symbol}: last ${out.latestPrice ? '$' + out.latestPrice : 'n/a'}, ${out.bullish} bullish / ${out.bearish} bearish of ${out.messagesSampled} posts`;
             else if (p.toolName === 'search_stock_news') d = (out.results || []).slice(0, 2).map((r) => r.title).join(' · ');
             else if (p.toolName === 'write_joke') d = `${out.model}`;
-            setStep(p.toolName, 'done', d);
-          } else if (p.state === 'output-error') setStep(p.toolName, 'error', (p.errorText || 'failed').slice(0, 200));
-          else setStep(p.toolName, 'running', 'Paying and fetching…');
+            setStep(p.toolName, 'done', d, receiptChip(pay));
+          } else if (p.state === 'output-error') setStep(p.toolName, 'error', (p.errorText || 'failed').slice(0, 200), '');
+          else setStep(p.toolName, 'running', 'Paying and fetching…', '');
         }
         if (p.type === 'text' && m.role === 'assistant') {
           const lines = p.text.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -125,44 +166,101 @@
           based = basedIdx >= 0 ? lines[basedIdx] : '';
         }
       }
-      if (m.metadata && Array.isArray(m.metadata.payments)) { payments = m.metadata.payments; total = m.metadata.totalAuthorizedUsdc; }
     }
+    const turns = payments.filter((p) => p.label.includes('orchestrator'));
     const settlement = (snapshot.settlements || [])[0];
     if (settlement && settlement.outcome !== 'completed') failed = settlement.error && settlement.error.message || settlement.outcome;
-
     if (joke) { $('#joke').textContent = joke; $('#based').textContent = based; $('#result').classList.remove('hidden'); }
-    if (payments.length) {
-      $('#rows').innerHTML = payments.map((p) => `<tr><td>${p.label}</td><td>${p.scheme}</td><td class="num">${money(p.authorizedUsdc)}</td><td>${p.tx ? `<a href="${p.tx}" target="_blank" rel="noopener">Basescan</a>` : (p.scheme === 'upto' ? 'settled by AI Gateway' : '—')}</td></tr>`).join('');
-      $('#total').textContent = money(total || 0);
-      $('#payments').classList.remove('hidden');
-    }
     if (settlement) {
-      setStep('orchestrator', failed ? 'error' : 'done', failed ? 'Failed' : `${payments.filter((p) => p.label.includes('orchestrator')).length} paid model turns`);
+      setStep('orchestrator', failed ? 'error' : 'done', failed ? 'Failed' : `${turns.length} paid model turns`, turns.map(receiptChip).join(' '));
       if (failed) { $('#error').textContent = failed; $('#error').classList.remove('hidden'); $('#result').classList.remove('hidden'); }
       return true;
     }
-    setStep('orchestrator', 'running', 'Thinking (each turn is an x402 payment)…');
+    setStep('orchestrator', 'running', `Thinking… ${turns.length} paid turn${turns.length === 1 ? '' : 's'} so far`, turns.map(receiptChip).join(' '));
     return false;
+  }
+
+  function showPaywall(body, sym) {
+    const url = (body.pay && body.pay.url) || `${PUBLIC}/agents/joke/<id>`;
+    $('#paytext').textContent = body.message || `Submitting a joke costs 0.10 USDC on Base via x402, or send the password.`;
+    $('#paycurl').textContent = `# any x402 client works; with @x402/fetch:\nconst res = await fetchWithPayment("${url}", {\n  method: "POST", headers: { "content-type": "application/json" },\n  body: JSON.stringify({ kind: "user", body: "Tell me a joke about ${sym}." })\n});\n// then GET the same URL to read the joke`;
+    const cached = body.cached;
+    if (cached) {
+      $('#cachedticker').textContent = cached.ticker; $('#cachedjoke').textContent = cached.joke;
+      $('#cachedreceipts').innerHTML = (cached.payments || []).map(receiptChip).join('');
+      $('#cachedwrap').classList.remove('hidden');
+    }
+    $('#paywall').classList.remove('hidden');
+    setStep('orchestrator', 'error', 'Not started: password or payment required.');
   }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const ticker = input.value.trim().toUpperCase(); if (!ticker) return;
+    const sym = ticker.value.trim().toUpperCase(); if (!sym) return;
     clearInterval(timer); reset(); go.disabled = true;
     const id = 'web-' + Math.random().toString(16).slice(2, 10);
-    const url = `/agents/joker/${id}`;
+    const url = `/agents/joke/${id}`;
+    const headers = { 'content-type': 'application/json' };
+    if (password.value) headers['x-joke-password'] = password.value;
     try {
-      const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'user', body: `Tell me a joke about ${ticker}.` }) });
+      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ kind: 'user', body: `Tell me a joke about ${sym}.` }) });
+      if (res.status === 402) { let body = {}; try { body = await res.json(); } catch {} if (!body.cached) { try { body.cached = (await (await fetch(`/api/jokes/latest?ticker=${sym}`)).json()).joke; } catch {} } showPaywall(body, sym); go.disabled = false; return; }
+      if (res.status === 401) { const b = await res.json().catch(() => ({})); setStep('orchestrator', 'error', b.message || 'Wrong password.'); go.disabled = false; return; }
       if (!res.ok) throw new Error(`POST ${res.status}: ${(await res.text()).slice(0, 200)}`);
     } catch (err) { setStep('orchestrator', 'error', String(err.message || err)); go.disabled = false; return; }
     const started = Date.now();
     timer = setInterval(async () => {
       try {
         const snap = await (await fetch(url)).json();
-        if (render(snap) || Date.now() - started > 180000) { clearInterval(timer); go.disabled = false; }
-      } catch (err) { /* transient; keep polling */ }
+        if (render(snap) || Date.now() - started > 240000) { clearInterval(timer); go.disabled = false; refreshFeed(); }
+      } catch {}
     }, 1500);
   });
+
+  // ---- live feed ----
+  let newest = null;
+  const seen = new Set();
+  function jokeCard(j, isNew) {
+    const when = new Date(j.createdAt);
+    const steps = (j.payments || []).filter((p) => !p.label.includes('orchestrator'));
+    const turns = (j.payments || []).filter((p) => p.label.includes('orchestrator'));
+    const el = document.createElement('article');
+    el.className = 'card' + (isNew ? ' new' : '');
+    el.dataset.id = j.id;
+    el.innerHTML = `<div class="meta"><span><span class="ticker">${esc(j.ticker)}</span>${j.title ? ' · ' + esc(j.title) : ''}</span><span title="${when.toISOString()}">${when.toLocaleString()}${j.paidBy === 'x402' ? ' · paid via x402' : ''}</span></div>
+      <p class="joke">${esc(j.joke)}</p>
+      <div class="step-detail">${esc((j.facts || []).slice(0, 3).join(' · '))}</div>
+      <div class="receipts">${steps.map((p) => `<span class="chip">${esc(p.label.split(' ')[0])} ${p.tx ? `<a href="${p.tx}" target="_blank" rel="noopener">${money(p.authorizedUsdc)} ↗</a>` : '≤ ' + money(p.authorizedUsdc)}</span>`).join('')}<span class="chip" title="orchestrator turns, upto ceilings">${turns.length} agent turns ≤ ${money(turns.reduce((s, p) => s + Number(p.authorizedUsdc), 0))}</span></div>`;
+    return el;
+  }
+  function sparkline(perHour) {
+    const svg = $('#spark'); const W = 240, H = 48;
+    const now = Date.now(); const buckets = [];
+    for (let i = 23; i >= 0; i--) { const t = new Date(now - i * 3600e3); t.setMinutes(0, 0, 0); buckets.push({ key: t.toISOString().slice(0, 13), count: 0 }); }
+    for (const h of perHour || []) { const b = buckets.find((x) => x.key === String(h.hour).slice(0, 13)); if (b) b.count = h.count; }
+    const max = Math.max(1, ...buckets.map((b) => b.count)); const bw = W / 24;
+    svg.innerHTML = buckets.map((b, i) => `<rect x="${(i * bw + 1).toFixed(1)}" y="${(H - (b.count / max) * (H - 4)).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${((b.count / max) * (H - 4)).toFixed(1)}" rx="1.5" fill="${b.count ? 'var(--accent)' : 'var(--line)'}"><title>${b.key.replace('T', ' ')}:00 — ${b.count}</title></rect>`).join('');
+  }
+  async function refreshStats() {
+    try { const s = await (await fetch('/api/stats')).json(); $('#s-count').textContent = s.count; $('#s-tickers').textContent = s.tickers; $('#s-usdc').textContent = Number(s.totalAuthorizedUsdc).toFixed(2); sparkline(s.perHour); } catch {}
+  }
+  async function refreshFeed() {
+    try {
+      const url = newest ? `/api/jokes?after=${encodeURIComponent(newest)}&limit=50` : '/api/jokes?limit=30';
+      const { jokes } = await (await fetch(url)).json();
+      const feed = $('#feed');
+      const fresh = jokes.filter((j) => !seen.has(j.id));
+      if (!fresh.length) return;
+      $('#feedempty')?.remove();
+      const ordered = newest ? fresh : fresh.slice().reverse();   // prepend newest last so it ends up on top
+      for (const j of ordered) { seen.add(j.id); feed.prepend(jokeCard(j, !!newest)); if (!newest || j.createdAt > newest) newest = j.createdAt; }
+      if (newest === null && jokes.length) newest = jokes[0].createdAt;
+      refreshStats();
+    } catch {}
+  }
+  refreshFeed(); refreshStats();
+  setInterval(refreshFeed, 3000);
+  setInterval(refreshStats, 15000);
 })();
 </script>
 </body>
