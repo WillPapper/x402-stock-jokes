@@ -9,7 +9,7 @@ When a Worker or Durable Object pays an x402 challenge, the "US-based buyer" req
 
 ## Expected vs. actual
 
-The Machine Payments docs say the account must be US-based with a card on file and that the request carries the account's token in `Authorization`. The buyer is the account (its token, its wallet). Expected: eligibility follows the account. Actual: eligibility follows the visitor of the Worker.
+The [Machine Payments docs](https://developers.cloudflare.com/ai-gateway/features/machine-payments/) say the account must be US-based with a card on file and that the request carries the account's token in `Authorization`. The buyer is the account (its token, its wallet). Expected: eligibility follows the account. Actual: eligibility follows the visitor of the Worker.
 
 ## Reproduction (no application code needed)
 
@@ -41,13 +41,13 @@ The same check can also fire later in the flow. When the unpaid request receives
 ## Why this matters
 
 - In an agent or server-side integration the buyer is the account. Tying eligibility to the visitor means a US seller's product only works for US users, and for non-US users it fails with an error that looks like a facilitator outage.
-- The behavior is undocumented. Neither the Machine Payments page nor the Monetization Gateway [eligibility](https://developers.cloudflare.com/monetization-gateway/eligibility/) and [x402](https://developers.cloudflare.com/monetization-gateway/x402/) pages mention that the visitor's country is used for Worker-originated payments, nor that it propagates into Durable Objects in any jurisdiction.
+- The behavior is undocumented. Neither the [Machine Payments](https://developers.cloudflare.com/ai-gateway/features/machine-payments/) page nor the Monetization Gateway [eligibility](https://developers.cloudflare.com/monetization-gateway/eligibility/) and [x402](https://developers.cloudflare.com/monetization-gateway/x402/) pages mention that the visitor's country is used for Worker-originated payments, nor that it propagates into Durable Objects in any jurisdiction.
 - The only working configuration we found is to do all paid work from a Durable Object alarm and to keep client requests away from that object until it is finished. That is a lot to discover from a `403`.
 
 ## Requests
 
 1. For `Authorization: Bearer <account token>` + `Payment-Method: x402`, evaluate eligibility on the account and/or the payer wallet.
 2. For Monetization Gateway payments originating from Workers or Durable Objects of an eligible account, treat the account as the buyer, or provide a documented way for the Worker to assert it.
-3. Until then, document the current behavior on both product pages, including the alarm pattern, and return a distinct error instead of `503 facilitator verify returned 403` when the country check fails at verify time.
+3. Until then, document the current behavior on both product pages ([Machine Payments](https://developers.cloudflare.com/ai-gateway/features/machine-payments/), [Monetization Gateway](https://developers.cloudflare.com/monetization-gateway/)), including the alarm pattern, and return a distinct error instead of `503 facilitator verify returned 403` when the country check fails at verify time.
 
 Reference implementation with full per-request logs (cf-ray, cf-aig ids, quote JWT claims, payer, timestamps): https://github.com/WillPapper/x402-stock-jokes, `GET https://jokes.papper.me/api/events?conversation=<id>`.
