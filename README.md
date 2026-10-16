@@ -19,6 +19,162 @@ A real run (2026-10-16):
 > Based on: NVDA traded at $214.85 on StockTwits with 671,863 people on its watchlist; an analyst sees about 31% upside and TipRanks asks if Nvidia can hit a $10 trillion market cap by 2030.
 > Paid: StockTwits 0.001 USDC [tx](https://basescan.org/tx/0x23107b86878bb565e6f0adfec8ea5e699267417e3401ac67fd086be98dea9b9a), Ceramic 0.001 USDC [tx](https://basescan.org/tx/0xfc277a0f2047ef062676926562a67b377dcd93876f86a74d09ed2a0aabe10c7a), AI Gateway joke ≤ 0.0258 USDC
 
+## Architecture
+
+Three views of the same system: what runs where, what happens during one joke, and where the USDC goes.
+
+### Components
+
+```mermaid
+flowchart TB
+  subgraph callers["Callers"]
+    direction LR
+    browser["Browser<br/>public/index.html"]
+    agentc["Another agent<br/>x402 client + wallet"]
+  end
+
+  subgraph cf["Cloudflare, jokes.papper.me"]
+    mgw["Monetization Gateway<br/>seller rule: POST /joke/* or /agents/joke/*<br/>without X-Joke-Password answers 402<br/>0.10 USDC, exact, paid to the app wallet"]
+    subgraph worker["Worker: x402-stock-jokes"]
+      hono["Hono app, src/app.ts<br/>gate: coupon header or PAYMENT-CONTEXT JWT<br/>/joke/:ticker, /agents/joke/:id, /api/*"]
+      subgraph flue["Flue runtime"]
+        direction LR
+        do["Durable Object FlueJokeAgent<br/>agent Joke, src/agents/joke.ts<br/>one per conversation id"]
+        provider["pi-ai provider x402-ai-gateway<br/>every model turn becomes a paid /ai/run call"]
+        tools["Tools, src/tools/<br/>fetch_stocktwits_signals<br/>search_stock_news<br/>write_joke"]
+      end
+      subgraph x402["x402 client, src/lib/"]
+        direction LR
+        budget["Budget<br/>per-payment and per-isolate caps<br/>checked before signing"]
+        paid["paidFetch: @x402/fetch<br/>ExactEvmScheme + UptoEvmScheme<br/>budget-guarded signTypedData"]
+        ledger["Ledger<br/>receipts, Basescan links"]
+      end
+    end
+    d1[("D1: jokes, access")]
+  end
+
+  subgraph sellers["x402 sellers"]
+    direction LR
+    st["StockTwits<br/>Monetization Gateway preview<br/>exact, 0.001 USDC"]
+    ceramic["Ceramic /search<br/>exact, 0.001 USDC"]
+    aigw["AI Gateway /ai/run<br/>upto, Permit2 ceiling<br/>real token cost settled"]
+  end
+
+  subgraph base["Base mainnet"]
+    direction LR
+    usdc["USDC + Permit2"]
+    alchemy["Alchemy Transfers API<br/>feeds /api/stats"]
+  end
+
+  browser -->|"POST with coupon,<br/>or hands agent instructions to an agent"| mgw
+  agentc -->|"POST, pays 0.10 USDC"| mgw
+  mgw -->|"forwards with PAYMENT-CONTEXT JWT"| hono
+  hono -->|"recordAccess(id, paidBy)"| d1
+  hono -->|"createAgentRouter(Joke)"| do
+  do -->|"useModel"| provider
+  do -->|"useTool"| tools
+  do -->|"useAgentFinish: insertJoke"| d1
+  provider --> paid
+  tools --> paid
+  budget --- paid
+  paid -->|"onReceipt"| ledger
+  paid -->|"exact"| st
+  paid -->|"exact"| ceramic
+  paid -->|"upto"| aigw
+  st --> usdc
+  ceramic --> usdc
+  aigw --> usdc
+  usdc -.-> alchemy
+```
+
+### Lifecycle of one joke
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as Buyer (agent or browser)
+  participant G as Monetization Gateway
+  participant W as Worker (Hono, src/app.ts)
+  participant D as D1
+  participant A as FlueJokeAgent (Durable Object)
+  participant AI as AI Gateway /ai/run
+  participant ST as StockTwits
+  participant CE as Ceramic
+  participant X as Base (USDC)
+
+  B->>G: POST /joke/NVDA (no coupon)
+  G-->>B: 402, PAYMENT-REQUIRED: 0.10 USDC, exact
+  B->>G: POST again with PAYMENT-SIGNATURE (EIP-3009)
+  G->>X: facilitator settles 0.10 USDC to the app wallet
+  G->>W: forward + PAYMENT-CONTEXT JWT
+  Note over W: checkAccess: coupon header, or verify the JWT<br/>against payments.cloudflare.com/certs
+  W->>D: recordAccess(id, paidBy)
+  W->>A: POST /agents/joke/<id> {kind: user, body: "Tell me a joke about NVDA."}
+  W-->>B: 202 { id, poll }
+
+  Note over A: useAgentStart: ledger.mark()
+  A->>AI: turn 1 (qwen3.8-27b), Payment-Method: x402
+  AI-->>A: 402, upto quote (ceiling about 0.13 USDC)
+  Note over A: Budget.reserve, sign Permit2 witness
+  A->>AI: retry with PAYMENT-SIGNATURE
+  AI->>X: settle real token cost (fractions of a cent)
+  AI-->>A: tool call: fetch_stocktwits_signals
+
+  A->>ST: step 1: GET symbols/show/NVDA
+  ST-->>A: 402, exact quote 0.001 USDC
+  A->>ST: retry with EIP-3009 authorization
+  ST->>X: facilitator settles 0.001 USDC
+  ST-->>A: symbol + PAYMENT-RESPONSE receipt (tx hash)
+  A->>ST: GET streams/symbol/NVDA (free)
+
+  A->>AI: turn 2 (paid as above)
+  AI-->>A: tool call: search_stock_news
+  A->>CE: step 2: POST /search, pays 0.001 USDC exact
+  CE->>X: facilitator settles
+  CE-->>A: headlines + receipt
+
+  A->>AI: turn 3 (paid as above)
+  AI-->>A: tool call: write_joke(facts)
+  A->>AI: step 3: /ai/run gemma-4, upto, ceiling about 0.026 USDC
+  AI->>X: settle real token cost
+  AI-->>A: the joke
+  Note over A: handoff.setDraft(id, joke, facts)
+
+  A->>AI: turn 4 (paid as above)
+  AI-->>A: final reply: joke, Based on, Paid
+  Note over A: useResponseFinish: attach ledger.since(mark)<br/>as metadata.payments
+  A->>D: useAgentFinish: insertJoke(ticker, joke, facts, payments, paidBy)
+
+  B->>W: GET poll URL (free, every few seconds)
+  W->>A: GET /agents/joke/<id> snapshot
+  W-->>B: { done: true, joke, basedOn, steps, payments }
+```
+
+### Flow of funds
+
+```mermaid
+flowchart LR
+  buyer["Buyer wallet"]
+  app["App wallet<br/>EVM_BASE_PRIVATE_KEY"]
+  st["StockTwits wallet"]
+  ce["Ceramic wallet"]
+  ai["AI Gateway wallet"]
+  permit2["Permit2 contract"]
+  alchemy["Alchemy Transfers API"]
+  page["/api/stats, /api/jokes<br/>USDC paid and earned, per seller and per joke"]
+
+  buyer -->|"0.10 USDC per joke, exact<br/>EIP-3009 signature, gas paid by Cloudflare's facilitator<br/>(skipped with a coupon code)"| app
+  app -->|"0.001 USDC per symbols/show, exact<br/>cap MAX_USDC_PER_DATA_CALL = 0.01"| st
+  app -->|"0.001 USDC per search, exact<br/>cap MAX_USDC_PER_DATA_CALL = 0.01"| ce
+  app -->|"upto: signs a ceiling per call (about 0.13 per turn, 0.026 per joke)<br/>only the real token cost moves, fractions of a cent<br/>cap MAX_USDC_PER_INFERENCE = 0.25"| ai
+  app -.->|"once: USDC.approve(Permit2), gas in ETH<br/>bun run approve"| permit2
+  permit2 -.->|"permitWitnessTransferFrom on settle"| ai
+  app -.->|"every USDC transfer in and out"| alchemy
+  alchemy -.-> page
+```
+
+**Reading the diagrams.** The buyer's 0.10 USDC lands in the same wallet the agent spends from, so sales top up costs. Every outgoing payment passes one signer, wrapped so the `Budget` is consulted before any signature exists: a payment over the per-call cap, or over the isolate total (`MAX_USDC_PER_ISOLATE`), is refused with no money moved. `exact` payments return a `PAYMENT-RESPONSE` receipt with the transaction hash; `upto` payments do not, so the page matches AI Gateway settlements to a joke by time window from the wallet's on-chain history.
+
 ## How the money moves
 
 | Step | Seller | Scheme | What you sign | Gas |
