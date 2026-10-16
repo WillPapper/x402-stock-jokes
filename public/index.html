@@ -74,10 +74,11 @@
 
   <section class="card" id="run">
     <ol class="steps" id="steps">
-      <li><span class="dot" data-step="orchestrator"></span><div><div class="step-title">Agent thinks (AI Gateway, x402)</div><div class="step-detail">Waiting for a ticker.</div></div><div class="receipt"></div></li>
+      <li><span class="dot" data-step="started"></span><div><div class="step-title">Agent started</div><div class="step-detail">Waiting for a ticker.</div></div><div class="receipt"></div></li>
       <li><span class="dot" data-step="fetch_stocktwits_signals"></span><div><div class="step-title">1. StockTwits chatter (x402)</div><div class="step-detail"></div></div><div class="receipt"></div></li>
       <li><span class="dot" data-step="search_stock_news"></span><div><div class="step-title">2. Ceramic news search (x402)</div><div class="step-detail"></div></div><div class="receipt"></div></li>
       <li><span class="dot" data-step="write_joke"></span><div><div class="step-title">3. Joke from AI Gateway (x402)</div><div class="step-detail"></div></div><div class="receipt"></div></li>
+      <li><span class="dot" data-step="finished"></span><div><div class="step-title">Agent finished</div><div class="step-detail">Each model turn is its own x402 payment to AI Gateway.</div></div><div class="receipt"></div></li>
     </ol>
   </section>
 
@@ -171,7 +172,8 @@
   }
   function reset() {
     for (const k of Object.keys(dots)) setStep(k, '', '', '');
-    setStep('orchestrator', 'running', 'Sending your request…');
+    setStep('started', 'running', 'Sending your request…');
+    setStep('finished', '', 'Each model turn is its own x402 payment to AI Gateway.', '');
     for (const id of ['result', 'paywall', 'error', 'cachedwrap']) $('#' + id).classList.add('hidden');
     $('#joke').textContent = ''; $('#based').textContent = '';
   }
@@ -205,11 +207,11 @@
     if (settlement && settlement.outcome !== 'completed') failed = settlement.error && settlement.error.message || settlement.outcome;
     if (joke) { $('#joke').textContent = joke; $('#based').textContent = based; $('#result').classList.remove('hidden'); }
     if (settlement) {
-      setStep('orchestrator', failed ? 'error' : 'done', failed ? 'Failed' : `${turns.length} paid model turns`, turns.map(receiptChip).join(' '));
+      setStep('finished', failed ? 'error' : 'done', failed ? 'Failed' : `${turns.length} paid model turns`, turns.map(receiptChip).join(' '));
       if (failed) { $('#error').textContent = failed; $('#error').classList.remove('hidden'); $('#result').classList.remove('hidden'); }
       return true;
     }
-    setStep('orchestrator', 'running', `Thinking… ${turns.length} paid turn${turns.length === 1 ? '' : 's'} so far`, turns.map(receiptChip).join(' '));
+    setStep('finished', 'running', `Working… ${turns.length} paid model turn${turns.length === 1 ? '' : 's'} so far`, turns.map(receiptChip).join(' '));
     return false;
   }
 
@@ -232,7 +234,7 @@
       $('#cachedwrap').classList.remove('hidden');
     }
     $('#paywall').classList.remove('hidden');
-    setStep('orchestrator', 'error', pwError ? 'Not started: wrong coupon code.' : 'Not started: pay 0.10 USDC or use a coupon code.');
+    setStep('started', 'error', pwError ? 'Not started: wrong coupon code.' : 'Not started: pay 0.10 USDC or use a coupon code.');
     if (pwError) password.focus();
   }
 
@@ -252,8 +254,10 @@
         go.disabled = false; return;
       }
       if (!res.ok) throw new Error(`POST ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    } catch (err) { setStep('orchestrator', 'error', String(err.message || err)); go.disabled = false; return; }
+    } catch (err) { setStep('started', 'error', String(err.message || err)); go.disabled = false; return; }
     if (pw) savePassword(pw);
+    setStep('started', 'done', pw ? 'Accepted with coupon code.' : 'Accepted.');
+    setStep('finished', 'running', 'Working…');
     const started = Date.now();
     timer = setInterval(async () => {
       try {
