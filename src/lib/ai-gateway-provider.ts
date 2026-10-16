@@ -136,7 +136,7 @@ export function createAiRunFetch(options: X402AiGatewayOptions): typeof fetch {
 			/* non-JSON error body */
 		}
 		if (!res.ok || !envelope?.success || !envelope.result) {
-			const message = envelope?.errors?.map((e) => `${e.code ?? ''} ${e.message ?? ''}`.trim()).join('; ') || text.slice(0, 300) || res.statusText;
+			const message = (envelope?.errors?.map((e) => `${e.code ?? ''} ${e.message ?? ''}`.trim()).join('; ') || text.slice(0, 300) || res.statusText) + ` [cf-ray ${res.headers.get('cf-ray') ?? '-'}]`;
 			options.onTurn?.({ model: String(model), status: res.status, description: `failed: ${message} | ${options.paidFetch.describeLast()}` });
 			return new Response(JSON.stringify({ error: { message: `AI Gateway /ai/run ${res.status}: ${message}`, type: 'ai_gateway_error' } }), {
 				status: res.ok ? 502 : res.status,

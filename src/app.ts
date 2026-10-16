@@ -39,6 +39,8 @@ app.use('/agents/joke/:id', async (c, next) => {
 		return c.json({ error: 'unauthorized', message: access.reason }, 401);
 	}
 	// The agent runs in a Durable Object (another isolate), so hand this over through D1.
+	const cf = (c.req.raw as Request & { cf?: { country?: string; colo?: string } }).cf;
+	console.log(`[gate] ${c.req.param('id')} by=${access.by} visitor=${cf?.country ?? '?'} colo=${cf?.colo ?? '?'}`);
 	await recordAccess(c.req.param('id'), access.by, access.amount).catch((err) => console.warn('recordAccess failed', (err as Error).message));
 	return next();
 });

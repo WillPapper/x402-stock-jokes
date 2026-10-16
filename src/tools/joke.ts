@@ -59,7 +59,7 @@ export async function writeJokeFor(symbol: string, facts: string[], model = conf
 		/* handled below */
 	}
 	if (!res.ok || !parsed.success) {
-		throw new Error(`AI Gateway joke call failed: HTTP ${res.status} ${parsed.errors?.map((e) => e.message).join('; ') ?? text.slice(0, 200)}`);
+		throw new Error(`AI Gateway joke call failed: HTTP ${res.status} ${parsed.errors?.map((e) => e.message).join('; ') ?? text.slice(0, 200)} [cf-ray ${res.headers.get('cf-ray') ?? '-'}]`);
 	}
 	const message = parsed.result?.choices?.[0]?.message;
 	const joke = (message?.content ?? '').trim();
