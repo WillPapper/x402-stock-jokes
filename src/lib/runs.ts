@@ -151,10 +151,10 @@ export async function stepOutput<T = unknown>(id: string, key: StepKey): Promise
 /** A paid model turn finished: count it, or record why it failed. */
 export async function recordTurn(id: string, ok: boolean, error?: string): Promise<void> {
 	await ensureRun(id);
-	await db()
-		.prepare(ok ? `UPDATE runs SET turns = turns + 1, last_error = NULL, updated_at = ?2 WHERE id = ?1` : `UPDATE runs SET last_error = ?3, updated_at = ?2 WHERE id = ?1`)
-		.bind(id, now(), (error ?? 'model turn failed').slice(0, 400))
-		.run();
+	const stmt = ok
+		? db().prepare(`UPDATE runs SET turns = turns + 1, last_error = NULL, updated_at = ?2 WHERE id = ?1`).bind(id, now())
+		: db().prepare(`UPDATE runs SET last_error = ?3, updated_at = ?2 WHERE id = ?1`).bind(id, now(), (error ?? 'model turn failed').slice(0, 400));
+	await stmt.run();
 }
 
 export async function finishRun(id: string, outcome: { state: 'done' } | { state: 'failed'; error: string }): Promise<void> {
