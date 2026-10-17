@@ -192,3 +192,21 @@ On closer reading this was not a bug: `/api/jokes?after=` returns rows oldest-fi
 6. Neutral dot style for the 402 state (item 2, partial).
 7. Collapse model-turn chips to one (item 5, partial).
 8. Favicon (item 24).
+
+---
+
+## Second pass (2026-10-17)
+
+Done after the live-panel, ticker-bounce and coupon-reveal fixes. All in `public/index.html` unless noted.
+
+1. **Stalled runs say so.** Polling slows to every 5 s after 5 minutes with a note (and links to the status JSON and permalink), and stops at 15 minutes with a final note. Three failed polls in a row show "Cannot reach the server right now. Retrying…" instead of a silent freeze.
+2. **A reload resumes the run.** The run id goes into the URL (`?run=<id>`) while a run is in progress or its result is showing; loading that URL resumes polling (or shows the finished result). `startedAt` and `lastEventAt` from `/joke/<id>` give the elapsed time. An id with no events ends with "No run with this id was found." after three polls.
+3. **Re-spend guard.** With a coupon, submitting a ticker that got a joke in the last 10 minutes shows "A joke about X was made 3 min ago. Show it · Run anyway" under the field instead of starting another paid run. "Show it" highlights the feed card.
+4. **Feed empty state** reads "Loading the feed…" until the first fetch comes back empty.
+5. A leading `$` is stripped from the ticker (`$NVDA`).
+6. The ticker field has a `<datalist>` of the 20 most recently used tickers from the feed.
+7. Deep links: `?ticker=AMD` prefills and focuses the field.
+8. Feed and stats polling pause while the tab is hidden and refresh on return; a run in progress keeps polling.
+9. Escape closes open under-the-hood panels and returns focus to the badge; the ticker input is linked to its error line with `aria-describedby`.
+10. Reduced motion disables the result pop animation and uses instant scrolls.
+11. **Human-readable permalink** at `/j/<run id>` (`src/app.ts`): the joke, facts, receipt chips, models, Open Graph and Twitter card tags, canonical URL, links to the JSON status and gateway events, and a "fresh joke" button that deep-links the ticker. Shows an auto-refreshing "in progress" page for a running id, a "run failed" page for a failed one, and a 404 page otherwise. Feed card timestamps and the result card link to it. Runs that only have gate events (bounced ticker, rejected coupon) are now reported as failed by the status endpoint after 10 idle minutes instead of "working" forever.

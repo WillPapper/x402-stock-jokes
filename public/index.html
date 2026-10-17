@@ -34,7 +34,13 @@
   .reveal:hover { color:var(--fg); background:var(--chip) }
   .hint { grid-column:2; margin:0; color:var(--muted); font-size:13px; line-height:1.4 }
   .hint.err { color:var(--err) }
-  #tickerhint { grid-column:1 }
+  .hint.warn { color:var(--warn) }
+  .hint.warn .linkbtn { font-size:13px }
+  #tickerhint, #recent { grid-column:1 }
+  .runnote { margin:12px 0 0; padding-top:10px; border-top:1px dashed var(--line); color:var(--muted); font-size:14px }
+  .runnote.err { color:var(--err) }
+  .feed .card.target { box-shadow:0 0 0 3px var(--accent) }
+  @media (prefers-reduced-motion: reduce) { .card.new { animation:none } }
   @media (max-width:560px) { .hint { grid-column:1 } }
   button { font:inherit; font-weight:600; padding:12px 18px; border:0; border-radius:10px; background:var(--accent); color:var(--accent-fg); cursor:pointer; transition:background .12s, transform .06s }
   button:hover:not(:disabled) { background:var(--accent-hover) }
@@ -102,6 +108,9 @@
   .paid { color:var(--muted); font-size:14px; margin:8px 0 0 }
   .err { color:var(--err); white-space:pre-wrap }
   .meta { display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:13px; margin-bottom:6px; flex-wrap:wrap }
+  .meta .plink { color:inherit; text-decoration:none }
+  .meta .plink:hover, .meta .plink:focus-visible { color:var(--accent); text-decoration:underline }
+  .result-actions a + a { margin-left:0 }
   .ticker { font-weight:700; color:var(--fg) }
   .result-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:14px; font-size:14px }
 
@@ -155,13 +164,15 @@
   <p class="sub">One joke per ticker. Every step is an x402 micro-payment in USDC on Base: StockTwits for the chatter, Ceramic for the news, Cloudflare AI Gateway for the punchline and for the agent's own turns.</p>
 
   <form id="form">
-    <input id="ticker" placeholder="Ticker, e.g. NVDA" maxlength="12" autocomplete="off" required aria-label="Ticker">
+    <input id="ticker" placeholder="Ticker, e.g. NVDA" maxlength="13" autocomplete="off" required aria-label="Ticker" aria-describedby="tickerhint" list="tickers">
+    <datalist id="tickers"></datalist>
     <div class="field">
       <input id="password" type="text" class="masked" placeholder="Coupon code (optional)" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Coupon code" aria-describedby="pwhint">
       <button type="button" class="reveal" id="reveal" aria-label="Show coupon code" aria-pressed="false">Show</button>
     </div>
     <button id="go" type="submit">Tell me a joke</button>
     <p class="hint err hidden" id="tickerhint" aria-live="polite"></p>
+    <p class="hint warn hidden" id="recent" aria-live="polite"><span id="recent-text"></span> <button type="button" class="linkbtn" id="recent-show">Show it</button> · <button type="button" class="linkbtn" id="recent-run">Run anyway</button></p>
     <p class="hint" id="pwhint" aria-live="polite">Optional. Without one, your agent pays 0.10 USDC via x402.</p>
   </form>
 
@@ -171,7 +182,7 @@
     <p class="based" id="based"></p>
     <p class="paid hidden" id="paid"></p>
     <p class="err hidden" id="error"></p>
-    <div class="result-actions"><button type="button" class="secondary" id="another">Tell me another</button><a id="permalink" href="#" target="_blank" rel="noopener">Permalink (JSON)</a></div>
+    <div class="result-actions"><button type="button" class="secondary" id="another">Tell me another</button><a id="permalink" href="#" target="_blank" rel="noopener">Permalink</a><a id="permalink-json" href="#" target="_blank" rel="noopener">Run status (JSON)</a></div>
   </section>
 
   <section class="card pay hidden" id="paywall">
@@ -205,6 +216,7 @@
       <li><span class="dot" data-step="write_joke"></span><div><button type="button" class="steptitle" aria-expanded="false">3. Joke from AI Gateway (x402)</button><div class="step-detail"></div></div><div class="receipt"></div></li>
       <li><span class="dot" data-step="finished"></span><div><button type="button" class="steptitle" aria-expanded="false">Agent turns</button><div class="step-detail">Each model turn is its own x402 payment to AI Gateway.</div></div><div class="receipt"></div></li>
     </ol>
+    <p class="runnote hidden" id="runnote" aria-live="polite"></p>
   </section>
 
   <h2>Live feed <small id="feedcount"></small></h2>
@@ -218,7 +230,7 @@
     <svg class="spark" id="spark" viewBox="0 0 240 48" preserveAspectRatio="none" aria-label="jokes per hour" role="img"></svg>
     <div class="axis"><span>24h ago</span><span>now</span></div>
   </div>
-  <div class="feed" id="feed"><p class="muted" id="feedempty">No jokes yet.</p></div>
+  <div class="feed" id="feed"><p class="muted" id="feedempty">Loading the feed…</p></div>
   <div class="more hidden" id="morewrap"><button type="button" class="secondary" id="more">Show older jokes</button></div>
 
   <footer id="wallet">Loading wallet…</footer>
@@ -238,6 +250,11 @@
   const PUBLIC = 'https://jokes.papper.me';
   const SELLER_ORDER = ['AI Gateway', 'StockTwits', 'Ceramic'];
   let timer = null, clock = null;
+  const scrollMode = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  const params = new URLSearchParams(location.search);
+  const setRunParam = (id) => { try { history.replaceState(null, '', id ? `?run=${encodeURIComponent(id)}` : location.pathname); } catch {} };
+  // StockTwits habit: people type $NVDA. Keep letters, digits and dots.
+  const normTicker = (v) => String(v || '').trim().toUpperCase().replace(/^\$/, '').replace(/[^A-Z0-9.]/g, '');
 
   // Coupon reveal toggle: the code is a password in all but name, so it is masked by default.
   // Chrome does not always repaint a script-filled input when -webkit-text-security
@@ -261,7 +278,34 @@
   password.addEventListener('input', () => { if (pwhint.classList.contains('err')) setPwHint(PW_HINT, false); });
   const tickerhint = $('#tickerhint');
   function setTickerError(msg) { tickerhint.textContent = msg || ''; tickerhint.classList.toggle('hidden', !msg); ticker.classList.toggle('invalid', !!msg); ticker.setAttribute('aria-invalid', msg ? 'true' : 'false'); }
-  ticker.addEventListener('input', () => { if (!tickerhint.classList.contains('hidden')) setTickerError(''); });
+  ticker.addEventListener('input', () => { if (!tickerhint.classList.contains('hidden')) setTickerError(''); hideRecent(); });
+
+  // A coupon run two minutes after the last one for the same ticker spends
+  // real USDC on a near-identical joke, so ask first and point at the fresh one.
+  const RECENT_MS = 600000;
+  let recent = null;   // { joke, sym, pw } while the hint is showing
+  const hideRecent = () => { recent = null; show('recent', false); };
+  async function recentJoke(sym) {
+    try {
+      const r = await fetch(`/api/jokes/latest?ticker=${encodeURIComponent(sym)}`);
+      if (!r.ok) return null;
+      const { joke } = await r.json();
+      return joke && Date.now() - Date.parse(joke.createdAt) < RECENT_MS ? joke : null;
+    } catch { return null; }
+  }
+  function showRecent(joke, sym, pw) {
+    recent = { joke, sym, pw };
+    $('#recent-text').textContent = `A joke about ${sym} was made ${relTime(joke.createdAt)}.`;
+    show('recent', true);
+  }
+  $('#recent-run').addEventListener('click', () => { if (!recent) return; const { sym, pw } = recent; hideRecent(); submit(sym, pw); });
+  $('#recent-show').addEventListener('click', () => {
+    if (!recent) return;
+    const card = document.querySelector(`.feed .card[data-id="${CSS.escape(recent.joke.id)}"]`);
+    if (!card) { window.open(`/j/${encodeURIComponent(recent.joke.conversationId)}`, '_blank'); return; }
+    card.scrollIntoView({ block: 'center', behavior: scrollMode });
+    card.classList.add('target'); setTimeout(() => card.classList.remove('target'), 2500);
+  });
 
   // ---- time helpers ----
   const relTime = (iso) => {
@@ -368,6 +412,17 @@
     container.querySelectorAll('.hood').forEach((h) => h.remove());
     container.querySelectorAll('[aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
   }
+  // Escape closes every open panel and hands focus back to the badge that opened it.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const panels = [...document.querySelectorAll('.hood')]; if (!panels.length) return;
+    for (const h of panels) {
+      const container = h.closest('#steps, .feed .card, #paywall'); if (!container) { h.remove(); continue; }
+      const badge = container.querySelector('.badge[aria-expanded="true"], .steptitle[aria-expanded="true"]');
+      closeHood(container); if (badge) badge.focus();
+    }
+    e.preventDefault();
+  });
   function toggleHood(container, key, data, extra, badge, mount) {
     const existing = container.querySelector('.hood');
     const wasOpen = existing && existing.dataset.k === key;
@@ -422,7 +477,7 @@
     if (receiptHtml !== undefined) dot.parentElement.querySelector('.receipt').innerHTML = receiptHtml;
   }
   const show = (id, on) => $('#' + id).classList.toggle('hidden', !on);
-  let runOutputs = {}, runPayments = [], runId = null, runStarted = 0, runSym = '';
+  let runOutputs = {}, runPayments = [], runId = null, runStarted = 0, runSym = '', runResumed = false;
   function reset() {
     runOutputs = {}; runPayments = [];
     document.querySelectorAll('#steps .hood').forEach((h) => h.remove());
@@ -434,8 +489,10 @@
     for (const id of ['result', 'paywall', 'error', 'cachedwrap', 'paid']) show(id, false);
     $('#joke').textContent = ''; $('#based').textContent = ''; $('#paid').textContent = '';
     show('run', true); show('bar', true);
-    setPwHint(PW_HINT, false); setTickerError('');
+    setPwHint(PW_HINT, false); setTickerError(''); hideRecent(); setRunNote(''); setRunParam(null);
   }
+  function setRunNote(html, isError) { const n = $('#runnote'); n.innerHTML = html || ''; n.classList.toggle('hidden', !html); n.classList.toggle('err', !!isError); }
+  const finishUi = () => { go.disabled = false; go.textContent = 'Tell me a joke'; clearInterval(clock); };
   function workingLine(turns) {
     const elapsed = runStarted ? mmss(Date.now() - runStarted) : '0:00';
     return `Working… ${elapsed} · usually 1–2 min${turns ? ` · ${turns} paid model turn${turns === 1 ? '' : 's'} so far` : ''}`;
@@ -478,7 +535,9 @@
     }
     for (const n of order) if (!states[n] || states[n] === 'pending') setStep(n, 'skipped', 'Skipped: the run stopped before this step.', '');
     const failed = st.outcome !== 'completed' ? (st.error || st.outcome) : null;
-    const took = runStarted ? mmss(Date.now() - runStarted) : null;
+    // A resumed run finished at its last event, not when this page noticed.
+    const endedAt = runResumed && st.lastEventAt ? Date.parse(st.lastEventAt) : Date.now();
+    const took = runStarted && endedAt > runStarted ? mmss(endedAt - runStarted) : null;
     setStep('finished', failed ? 'skipped' : 'done', failed ? `Stopped after ${turns.length} paid model turn${turns.length === 1 ? '' : 's'}${took ? ` (${took})` : ''}.` : `${turns.length} paid model turns${took ? ` · finished in ${took}` : ''}`, turnsChip(turns));
     show('bar', false);
     showResult(st, failed, turns.length, took);
@@ -496,8 +555,9 @@
     const sym = st.ticker || runSym;
     $('#r-ticker').textContent = sym;
     $('#r-title').textContent = runOutputs.fetch_stocktwits_signals?.title ? ' · ' + runOutputs.fetch_stocktwits_signals.title : '';
-    $('#r-when').innerHTML = timeEl(new Date().toISOString());
-    $('#permalink').href = `/joke/${encodeURIComponent(st.id || runId)}`;
+    $('#r-when').innerHTML = timeEl(runResumed && st.lastEventAt ? st.lastEventAt : new Date().toISOString());
+    $('#permalink').href = `/j/${encodeURIComponent(st.id || runId)}`;
+    $('#permalink-json').href = `/joke/${encodeURIComponent(st.id || runId)}`;
     if (st.joke) { $('#joke').textContent = st.joke; $('#based').textContent = st.facts?.length ? 'Based on: ' + st.facts.slice(0, 3).map(cleanFact).join(' · ') : (st.basedOn ? 'Based on: ' + st.basedOn : ''); }
     if (failed) { $('#error').textContent = friendlyFailure(failed, sym); show('error', true); }
     $('#another').textContent = failed ? 'Try another ticker' : 'Tell me another';
@@ -508,7 +568,7 @@
     const failedAt = STEP_LABEL[st.failedStep] || STEP_LABEL[order3.find((n) => dots[n].dataset.state === 'error')];
     $('#summary-text').textContent = failed ? `Stopped at ${failedAt ? `step ${failedAt}` : `step ${doneSteps + 1}`}${took ? ` after ${took}` : ''}.` : `${doneSteps} paid steps · ${turnCount} model turns${took ? ` · ${took}` : ''}`;
     $('#run').classList.add('collapsed', 'done');
-    res.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    res.scrollIntoView({ block: 'start', behavior: scrollMode });
   }
   $('#summary-toggle').addEventListener('click', () => {
     const run = $('#run'); const open = run.classList.toggle('collapsed') === false;
@@ -517,7 +577,7 @@
   });
   // Clicking the collapsed summary text also opens it.
   $('#summary-text').addEventListener('click', () => $('#summary-toggle').click());
-  $('#another').addEventListener('click', () => { ticker.value = ''; ticker.focus(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  $('#another').addEventListener('click', () => { ticker.value = ''; setRunParam(null); ticker.focus(); window.scrollTo({ top: 0, behavior: scrollMode }); });
 
   async function showRunCost(sym) {
     try {
@@ -548,7 +608,7 @@
       password.focus(); password.select();
     } else {
       setPwHint('No coupon entered: the instructions below let your agent pay instead.', false);
-      $('#paywall').scrollIntoView({ block: 'start', behavior: 'smooth' });
+      $('#paywall').scrollIntoView({ block: 'start', behavior: scrollMode });
     }
   }
 
@@ -558,7 +618,7 @@
     let id = null; runId = null; runSym = sym; runStarted = 0;
     const headers = {};
     if (pw) headers['x-joke-password'] = pw;
-    const done = () => { go.disabled = false; go.textContent = 'Tell me a joke'; clearInterval(clock); };
+    const done = finishUi;
     try {
       const res = await fetch(`/joke/${encodeURIComponent(sym)}`, { method: 'POST', headers });
       if (res.status === 402 || res.status === 401) {
@@ -581,20 +641,43 @@
       if (!id) throw new Error('the server did not return a run id');
     } catch (err) { setStep('started', 'error', String(err.message || err)); show('bar', false); done(); return; }
     if (pw) savePassword(pw);
-    runStarted = Date.now();
-    setStep('started', 'done', pw ? 'Accepted with coupon code.' : 'Accepted.');
+    watchRun(id, sym, pw ? 'Accepted with coupon code.' : 'Accepted.');
+  }
+  // Poll /joke/<id> until the run settles. The id goes into the URL so a reload
+  // (or a "watch live" link from the permalink page) resumes watching instead of
+  // losing a run that is still spending. Polling slows after 5 minutes and stops
+  // after 15, with a note either way; the server itself gives up at 10 idle minutes.
+  const SLOW_AFTER_MS = 300000, STOP_AFTER_MS = 900000;
+  function watchRun(id, sym, startedDetail, resumed) {
+    runId = id; runSym = sym; runResumed = !!resumed; runStarted = resumed ? 0 : Date.now();
+    setRunParam(id);
+    setStep('started', 'done', startedDetail);
     setStep('fetch_stocktwits_signals', 'running', 'The agent is reading the data and deciding its next step…');
     setStep('search_stock_news', '', 'Not started.'); setStep('write_joke', '', 'Not started.');
     setStep('finished', 'running', workingLine(0));
     clock = setInterval(() => { if (dots.finished.classList.contains('running')) { const t = runPayments.filter((p) => p.label.includes('orchestrator') && p.ok).length; dots.finished.parentElement.querySelector('.step-detail').textContent = workingLine(t); } }, 1000);
-    timer = setInterval(async () => {
-      try {
-        const st = await (await fetch(`/joke/${id}`)).json();
-        const finished = render(st);
-        refreshStepHood();
-        if (finished || Date.now() - runStarted > 300000) { clearInterval(timer); done(); refreshFeed(); setTimeout(() => showRunCost(sym), 4000); }
-      } catch {}
-    }, 1500);
+    const links = `<a href="/joke/${encodeURIComponent(id)}" target="_blank" rel="noopener">run status (JSON)</a> · <a href="/j/${encodeURIComponent(id)}" target="_blank" rel="noopener">permalink</a>`;
+    let polls = 0, failures = 0, slow = false;
+    const stop = () => { clearInterval(timer); timer = null; finishUi(); };
+    const poll = async () => {
+      let st;
+      try { st = await (await fetch(`/joke/${encodeURIComponent(id)}`)).json(); }
+      catch { if (++failures >= 3) setRunNote('Cannot reach the server right now. Retrying…', true); return; }
+      failures = 0; polls++;
+      if (!runStarted) runStarted = st.startedAt ? Date.parse(st.startedAt) : Date.now();
+      if (resumed && st.outcome === 'unknown' && polls >= 3) { stop(); show('bar', false); setStep('started', 'error', 'No run with this id was found.'); setRunNote(`Nothing has been recorded for this run id. ${links}`, true); setRunParam(null); return; }
+      const finished = render(st);
+      refreshStepHood();
+      if (finished) { stop(); setRunNote(''); refreshFeed(); setTimeout(() => showRunCost(sym), 4000); return; }
+      const age = Date.now() - runStarted;
+      if (age > STOP_AFTER_MS) { stop(); show('bar', false); setRunNote(`This page stopped checking after 15 minutes. The run may still finish; reload to check, or open the ${links}.`, true); return; }
+      if (age > SLOW_AFTER_MS) {
+        if (!slow) { slow = true; clearInterval(timer); timer = setInterval(poll, 5000); }
+        setRunNote(`Still working after 5 minutes, which is unusual. The server gives up after 10 minutes without progress. ${links}`);
+      } else setRunNote('');
+    };
+    timer = setInterval(poll, 1500);
+    poll();
   }
   const STEP_KEY = { fetch_stocktwits_signals: 'stocktwits', search_stock_news: 'ceramic', write_joke: 'joke', finished: 'turns' };
   function stepHoodData(name, key) {
@@ -624,10 +707,19 @@
     btn.addEventListener('click', (e) => { e.stopPropagation(); open(); });
     li.addEventListener('click', (e) => { if (e.target.closest('a, button, .hood')) return; open(); });
   });
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const sym = ticker.value.trim().toUpperCase(); if (!sym) return;
-    submit(sym, password.value.trim());    // no coupon: the 402 card with agent instructions appears
+    const sym = normTicker(ticker.value); if (!sym) return;
+    ticker.value = sym;
+    const pw = password.value.trim();
+    hideRecent();
+    if (pw) {   // a coupon run is a real spend; a recent joke for the same ticker is worth a pause
+      go.disabled = true;
+      const j = await recentJoke(sym);
+      go.disabled = false;
+      if (j) { showRecent(j, sym, pw); return; }
+    }
+    submit(sym, pw);    // no coupon: the 402 card with agent instructions appears
   });
 
   // ---- live feed ----
@@ -637,7 +729,7 @@
     const el = document.createElement('article');
     el.className = 'card' + (isNew ? ' new' : '');
     el.dataset.id = j.id;
-    el.innerHTML = `<div class="meta"><span><span class="ticker">${esc(j.ticker)}</span>${j.title ? ' · ' + esc(j.title) : ''}</span><span>${timeEl(j.createdAt)}</span></div>
+    el.innerHTML = `<div class="meta"><span><span class="ticker">${esc(j.ticker)}</span>${j.title ? ' · ' + esc(j.title) : ''}</span>${j.conversationId ? `<a class="plink" href="/j/${encodeURIComponent(j.conversationId)}" title="Permalink to this joke">${timeEl(j.createdAt)}</a>` : `<span>${timeEl(j.createdAt)}</span>`}</div>
       <p class="joke">${esc(j.joke)}</p>
       <div class="step-detail">${esc((j.facts || []).slice(0, 3).map(cleanFact).join(' · '))}</div>
       <div class="receipts">${receiptsRow(j)}</div>`;
@@ -682,8 +774,10 @@
       const feed = $('#feed');
       const fresh = jokes.filter((j) => !seen.has(j.id));
       tickTimes();
+      if (!seen.size && !fresh.length) { const e = $('#feedempty'); if (e) e.textContent = 'No jokes yet.'; }
       if (!fresh.length) return;
       $('#feedempty')?.remove();
+      noteTickers(fresh);
       // The first page is newest-first; `after` pages are oldest-first. Prepend oldest first so the newest ends on top.
       const ordered = fresh.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
       for (const j of ordered) { seen.add(j.id); feed.prepend(jokeCard(j, !!newest)); if (!newest || j.createdAt > newest) newest = j.createdAt; if (!oldest || j.createdAt < oldest) oldest = j.createdAt; }
@@ -696,15 +790,38 @@
       const { jokes } = await (await fetch(`/api/jokes?before=${encodeURIComponent(oldest)}&limit=30`)).json();
       const feed = $('#feed');
       for (const j of jokes) { if (seen.has(j.id)) continue; seen.add(j.id); feed.appendChild(jokeCard(j, false)); if (!oldest || j.createdAt < oldest) oldest = j.createdAt; }
+      noteTickers(jokes);
       if (!jokes.length) total = seen.size;
     } catch {}
     btn.disabled = false; btn.textContent = 'Show older jokes'; updateMore();
   }
   $('#more').addEventListener('click', loadOlder);
+  // The ticker field suggests symbols the feed already has jokes for (most recent first).
+  const tickerSeen = new Map();
+  function noteTickers(jokes) {
+    for (const j of jokes) if (j.ticker && (!tickerSeen.has(j.ticker) || tickerSeen.get(j.ticker) < j.createdAt)) tickerSeen.set(j.ticker, j.createdAt);
+    const list = [...tickerSeen.entries()].sort((a, b) => (a[1] < b[1] ? 1 : -1)).slice(0, 20);
+    $('#tickers').innerHTML = list.map(([t]) => `<option value="${esc(t)}"></option>`).join('');
+  }
+  // Feed and stats polling pauses while the tab is hidden; a run in progress keeps polling.
+  const whenVisible = (fn) => () => { if (!document.hidden) fn(); };
   refreshFeed(); refreshStats();
-  setInterval(refreshFeed, 3000);
-  setInterval(refreshStats, 15000);
-  setInterval(tickTimes, 30000);
+  setInterval(whenVisible(refreshFeed), 3000);
+  setInterval(whenVisible(refreshStats), 15000);
+  setInterval(whenVisible(tickTimes), 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { tickTimes(); refreshFeed(); refreshStats(); } });
+
+  // Deep links: ?ticker=AMD prefills the field; ?run=<id> resumes watching a run.
+  const runParam = params.get('run');
+  if (runParam && /^[A-Za-z0-9._-]{1,80}$/.test(runParam)) {
+    clearInterval(timer); clearInterval(clock); reset(); go.disabled = true; go.textContent = 'Working…';
+    const sym = normTicker(runParam.split('-')[1] || '');
+    ticker.value = sym;
+    watchRun(runParam, sym, 'Resumed watching this run.', true);
+  } else {
+    const t = normTicker(params.get('ticker') || '');
+    if (t) { ticker.value = t; ticker.focus(); try { ticker.setSelectionRange(t.length, t.length); } catch {} }
+  }
 })();
 </script>
 </body>
