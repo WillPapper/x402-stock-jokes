@@ -19,7 +19,7 @@
 		// the Worker verifies the Access JWT against this team domain and AUD tag.
 		// Empty AUD = those routes answer 403 (fail closed). See README "Logging".
 		"ACCESS_TEAM_DOMAIN": "https://papper.cloudflareaccess.com",
-		"ACCESS_AUD": ""
+		"ACCESS_AUD": "e2997b9c7d9e7508129c7b29211b0db522890fc9f1e805d926644caa3ad5e217"
 	},
 	// public/ is served as static assets (the page); agent and API routes run
 	// on the Worker first.
