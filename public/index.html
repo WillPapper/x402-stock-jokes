@@ -240,9 +240,19 @@
   let timer = null, clock = null;
 
   // Coupon reveal toggle: the code is a password in all but name, so it is masked by default.
+  // Chrome does not always repaint a script-filled input when -webkit-text-security
+  // changes (the mask stays until the field is focused), so re-set the value to
+  // rebuild the field's text after every toggle, keeping any caret position.
+  const repaintMask = () => {
+    const v = password.value, focused = document.activeElement === password;
+    const [a, b] = focused ? [password.selectionStart, password.selectionEnd] : [null, null];
+    password.value = ''; void password.offsetWidth; password.value = v;
+    if (focused && a != null) try { password.setSelectionRange(a, b); } catch {}
+  };
   $('#reveal').addEventListener('click', () => {
     const show = password.classList.contains('masked');
     password.classList.toggle('masked', !show);
+    repaintMask();
     $('#reveal').textContent = show ? 'Hide' : 'Show';
     $('#reveal').setAttribute('aria-pressed', String(show));
     $('#reveal').setAttribute('aria-label', show ? 'Hide coupon code' : 'Show coupon code');
