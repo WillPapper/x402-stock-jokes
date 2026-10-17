@@ -83,6 +83,7 @@ const INDEX_PAGE = [
 	/\b(buy|how to buy)\b.{0,20}\bstock\b.*\b(price|quote)\b/i,
 	/\b(annual report|10-k|10-q|8-k|form 4|statement of changes|proxy statement)\b/i,
 	/\bwikipedia\b|\boptions? etp\b|\bcfd\b/i,
+	/\b(stock quote|options? chain|stock chart|dividend history|earnings date|short interest|institutional ownership)\b/i,
 	/\b(news|headlines|updates) - [\w .&'’]+$/i,
 ];
 const JUNK_HOSTS = /(^|\.)(urlscan\.io|wikipedia\.org|defenseworld\.net|marketbeat\.com|simply-invest\.info|spreaker\.com|feedburner\.com)$/i;

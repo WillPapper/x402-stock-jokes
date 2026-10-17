@@ -63,6 +63,8 @@ describe('rankNews', () => {
 		{ title: 'AMD Falls More Steeply Than Broader Market: What Investors Need to Know', url: 'https://finviz.com/news/x', description: 'AMD' },
 		{ title: 'AMD layoffs News - WDW News Today', url: 'https://x.test/tag/amd', description: 'AMD' },
 		{ title: 'D23 Announces Line Up of 2024 AMD Legends Award Honorees', url: 'https://x.test/d23', description: 'AMD honorees' },
+		{ title: 'Star Tribune - AMD (NASDAQ:AMD) Stock Quote', url: 'https://markets.financialcontent.com/startribune/quote?Symbol=AMD', description: 'AMD' },
+		{ title: 'AMD Stock (AMD) Option Chain - StockScan', url: 'https://stockscan.io/stocks/AMD/options', description: 'AMD' },
 		{ title: 'AMD and OpenAI Announce Strategic Partnership to Deploy 6 Gigawatts of AMD GPUs', url: 'https://www.ir.amd.com/news-events/press-releases/detail/1260/x/', description: 'dup' },
 	];
 	const ranked = rankNews(raw, { company: 'Advanced Micro Devices', symbol: 'AMD', now, limit: 6 });
@@ -78,9 +80,9 @@ describe('rankNews', () => {
 		expect(titles).not.toMatch(/Stories, News/);
 		expect(titles).not.toMatch(/Accuracy Rate|Reasons Why|Insiders Are Selling|Going On With/);
 		expect(titles).not.toMatch(/urlscan|Nvidia Beats|Vega/);
-		expect(titles).not.toMatch(/Top Media|How to Buy|Need to Know|WDW News/);
+		expect(titles).not.toMatch(/Top Media|How to Buy|Need to Know|WDW News|Stock Quote|Option Chain/);
 		expect(ranked.dropped.listicle).toBeGreaterThanOrEqual(7);
-		expect(ranked.dropped.index).toBeGreaterThanOrEqual(2);
+		expect(ranked.dropped.index).toBeGreaterThanOrEqual(4);
 		expect(ranked.dropped.junk).toBe(1);
 		expect(ranked.dropped['off-topic']).toBe(1);
 		expect(ranked.dropped.stale).toBe(1);
