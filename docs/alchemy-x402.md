@@ -11,7 +11,11 @@
 - **`ALCHEMY_API_KEY` is ignored by the gateway.** With the key in the URL we got the same anonymous $0.001 quote. As a `Bearer` token it got `401`, asking for a SIWE header (probes below). No path we found links an x402 payment to the account behind the key.
 - **Overage on the existing account comes only from upgrading to Pay-As-You-Go.** That plan charges a card automatically and removes the free 30M CU a month ([PAYG article](https://support.alchemy.com/articles/2300474614-understanding-alchemy-s-pay-as-you-go-billing-model)).
 - **A practical "overage via x402":** keep the free key as the main path. When the key hits its limit, fall back to the gateway, paying from the app wallet's credits. The price per CU matches PAYG, and the key keeps its free 30M CU. **This app now does this** (see "The fallback in this app" below).
-- **Live test (2026-10-17): the gateway took $1 and did not credit it.** The top-up settled on-chain, but the paid request answered `500`. A few minutes later the gateway was quoting a new $1 for the same wallet. Report for Alchemy: [alchemy-gateway-topup-not-credited.md](alchemy-gateway-topup-not-credited.md).
+- **Live tests (2026-10-17), both modes:**
+    - **Credits:** the gateway took $1 and did not credit it. The top-up settled on-chain, but the paid request answered `500`, and the gateway kept quoting a new $1 for the same wallet.
+    - **Pay-per-request ($0.001):** works for `alchemy_getAssetTransfers`, the call the fallback makes (`200`, 475 transfers).
+    - **Standard `eth_*` calls** (`eth_blockNumber`, `eth_call`) answered `500 Internal error` after payment in both modes.
+    - Report for Alchemy: [alchemy-gateway-topup-not-credited.md](alchemy-gateway-topup-not-credited.md).
 
 ## Requirements
 
