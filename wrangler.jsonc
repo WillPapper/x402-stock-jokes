@@ -14,6 +14,11 @@
 		"MAX_USDC_PER_DATA_CALL": "0.01",
 		"MAX_USDC_PER_INFERENCE": "0.25",
 		"MAX_USDC_PER_ISOLATE": "5",
+		// Alchemy fallback (src/lib/alchemy.ts): when the free-plan key is out of
+		// capacity, the app wallet buys gateway credits, sold in $1 top-ups (and
+		// at most one top-up a day app-wide, enforced in code).
+		"MAX_USDC_PER_ALCHEMY_TOPUP": "1",
+		"MAX_USDC_ALCHEMY_PER_ISOLATE": "1",
 		"RUNNER_LOCATION_HINT": "wnam",
 		// /api/events and /api/_trace sit behind a Cloudflare Access self-hosted app;
 		// the Worker verifies the Access JWT against this team domain and AUD tag.

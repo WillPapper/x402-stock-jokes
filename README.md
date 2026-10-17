@@ -81,6 +81,8 @@ Spend caps and model choices are plain-text vars in `wrangler.jsonc`, enforced *
 | `MAX_USDC_PER_DATA_CALL` | `0.01` | cap per StockTwits or Ceramic payment (they quote 0.001) |
 | `MAX_USDC_PER_INFERENCE` | `0.25` | cap per AI Gateway authorization ceiling (Qwen quotes about 0.13) |
 | `MAX_USDC_PER_ISOLATE` | `5` | total one Worker isolate may authorize before it refuses |
+| `MAX_USDC_PER_ALCHEMY_TOPUP` | `1` | cap per Alchemy gateway credit top-up (quoted at exactly 1.00), used only when the free Alchemy key is out of capacity |
+| `MAX_USDC_ALCHEMY_PER_ISOLATE` | `1` | Alchemy top-ups one isolate may buy; app-wide the code also allows at most one per 24 h |
 
 They apply in `bun run dev`, in production, and in the scripts, which read `wrangler.jsonc` too. `.dev.vars` holds only the secrets.
 
@@ -156,7 +158,7 @@ Fill `.dev.vars`:
   ```
 - `EVM_BASE_ADDRESS` / `EVM_BASE_PRIVATE_KEY`: `bun run wallet:new` creates a dedicated wallet, or paste your own. Keep only a few dollars in it.
 - `JOKE_PASSWORD`: the coupon code that lets friends skip the paywall.
-- `ALCHEMY_API_KEY`: an [Alchemy](https://www.alchemy.com) app key with Base Mainnet enabled, for the wallet's USDC history (`/api/stats`, `/api/transfers`).
+- `ALCHEMY_API_KEY`: an [Alchemy](https://www.alchemy.com) app key with Base Mainnet enabled, for the wallet's USDC history (`/api/stats`, `/api/transfers`). When Alchemy refuses it for capacity (429, or 403 "Monthly capacity limit exceeded"), calls fall back to Alchemy's x402 gateway, paid from the app wallet's prepaid credits ([docs/alchemy-x402.md](docs/alchemy-x402.md)).
 
 Then:
 
@@ -228,6 +230,7 @@ src/lib/ai-gateway-provider.ts the agent's model, paid with x402 through AI Gate
 src/lib/access.ts              password or Monetization Gateway PAYMENT-CONTEXT check
 src/lib/db.ts                  D1: jokes (insert, feed, per-ticker latest, stats) and access (how each conversation was admitted)
 src/lib/transfers.ts           the wallet's USDC transfers from Alchemy: USDC paid per seller, earned, per-joke settled amounts
+src/lib/alchemy.ts             Alchemy JSON-RPC: free key first, x402 gateway credits (SIWE, $1 top-ups) when the key is out of capacity
 src/lib/budget.ts, ledger.ts   spend caps, payment records
 public/index.html              the page
 migrations/                    D1 schema

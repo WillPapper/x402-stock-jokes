@@ -236,7 +236,9 @@ export function createPaidFetch(options: PaidFetchOptions) {
 			throw err;
 		}
 		const receipt = decodeReceipt(res.headers.get('PAYMENT-RESPONSE'));
-		const settled = res.ok && receipt?.success === true;
+		// A successful receipt means the money moved, even if the seller then failed the
+		// request (Alchemy's gateway settled a top-up and answered 500): count it.
+		const settled = receipt?.success === true;
 		const authorized = pending;
 		if (authorized !== null) {
 			if (settled) budget.commit(authorized);

@@ -7,7 +7,7 @@
  */
 import { env } from 'cloudflare:workers';
 
-export type EventKind = 'x402.payment' | 'gate' | 'ai.turn' | 'error' | 'tool.start' | 'tool.done' | 'tool.error' | 'agent.done';
+export type EventKind = 'x402.payment' | 'alchemy.fallback' | 'alchemy.topup' | 'gate' | 'ai.turn' | 'error' | 'tool.start' | 'tool.done' | 'tool.error' | 'agent.done';
 
 export interface LoggedEvent {
 	ts: string;
@@ -28,6 +28,25 @@ export const conversationScope = {
 };
 
 export function logEvent(kind: EventKind, ok: boolean, data: Record<string, unknown>, opts: { conversationId?: string | null; label?: string | null } = {}): LoggedEvent {
+	return writeEvent(kind, ok, data, opts).event;
+}
+
+/** logEvent, but resolves once the D1 row is written: for events that later decisions read back. */
+export async function logEventDurably(kind: EventKind, ok: boolean, data: Record<string, unknown>, opts: { conversationId?: string | null; label?: string | null } = {}): Promise<LoggedEvent> {
+	const { event, persisted } = writeEvent(kind, ok, data, opts);
+	await persisted;
+	return event;
+}
+
+/** Time of the latest event of `kind` at or after `since` (ISO), or null (also when D1 is unavailable). */
+export async function lastEventAt(kind: EventKind, since: string): Promise<string | null> {
+	const db = (env as unknown as { DB?: D1Database }).DB;
+	if (!db) return null;
+	const row = await db.prepare('SELECT ts FROM events WHERE kind = ?1 AND ts >= ?2 ORDER BY ts DESC LIMIT 1').bind(kind, since).first<{ ts: string }>();
+	return row?.ts ?? null;
+}
+
+function writeEvent(kind: EventKind, ok: boolean, data: Record<string, unknown>, opts: { conversationId?: string | null; label?: string | null }): { event: LoggedEvent; persisted: Promise<void> } {
 	const event: LoggedEvent = {
 		ts: new Date().toISOString(),
 		kind,
@@ -39,13 +58,15 @@ export function logEvent(kind: EventKind, ok: boolean, data: Record<string, unkn
 	// One JSON line per event: easy to grep in `wrangler tail` and Workers Logs.
 	console.log(JSON.stringify({ event: kind, ok, conversation: event.conversationId, label: event.label, ...data }));
 	const db = (env as unknown as { DB?: D1Database }).DB;
-	if (db) {
-		db.prepare('INSERT INTO events (ts, kind, conversation_id, label, ok, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-			.bind(event.ts, kind, event.conversationId, event.label, ok ? 1 : 0, JSON.stringify(data))
-			.run()
-			.catch((err: unknown) => console.warn('event persist failed', (err as Error).message.slice(0, 120)));
-	}
-	return event;
+	const persisted = db
+		? db
+				.prepare('INSERT INTO events (ts, kind, conversation_id, label, ok, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
+				.bind(event.ts, kind, event.conversationId, event.label, ok ? 1 : 0, JSON.stringify(data))
+				.run()
+				.then(() => undefined)
+				.catch((err: unknown) => console.warn('event persist failed', (err as Error).message.slice(0, 120)))
+		: Promise.resolve();
+	return { event, persisted };
 }
 
 export async function listEvents(opts: { limit?: number; conversationId?: string; kind?: string; failuresOnly?: boolean; since?: string; ascending?: boolean } = {}) {

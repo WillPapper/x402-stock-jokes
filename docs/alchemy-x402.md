@@ -10,7 +10,8 @@
 - **One exception is pay-per-request.** A request without SIWE gets a different quote: $0.001 per request, "no account required". The docs don't mention this mode.
 - **`ALCHEMY_API_KEY` is ignored by the gateway.** With the key in the URL we got the same anonymous $0.001 quote. As a `Bearer` token it got `401`, asking for a SIWE header (probes below). No path we found links an x402 payment to the account behind the key.
 - **Overage on the existing account comes only from upgrading to Pay-As-You-Go.** That plan charges a card automatically and removes the free 30M CU a month ([PAYG article](https://support.alchemy.com/articles/2300474614-understanding-alchemy-s-pay-as-you-go-billing-model)).
-- **A practical "overage via x402":** keep the free key as the main path. When the key hits its limit, fall back to the gateway, paying from the app wallet's credits. The price per CU matches PAYG, and the key keeps its free 30M CU.
+- **A practical "overage via x402":** keep the free key as the main path. When the key hits its limit, fall back to the gateway, paying from the app wallet's credits. The price per CU matches PAYG, and the key keeps its free 30M CU. **This app now does this** (see "The fallback in this app" below).
+- **Live test (2026-10-17): the gateway took $1 and did not credit it.** The top-up settled on-chain, but the paid request answered `500`. A few minutes later the gateway was quoting a new $1 for the same wallet. Report for Alchemy: [alchemy-gateway-topup-not-credited.md](alchemy-gateway-topup-not-credited.md).
 
 ## Requirements
 
@@ -71,19 +72,22 @@ CU figures are from [Compute Unit Costs](https://www.alchemy.com/docs/reference/
 - A stats refresh (2 transfer calls) costs 240 CU: $0.000108 on credits, versus $0.002 per request without SIWE. **Always sign in:** for this traffic, credits cost 18x less than per-request (85x less for `eth_call`).
 - $1 of credits buys about 9,200 stats refreshes. The free 30M CU buys about 125,000 a month. One isolate refreshing every 30 s for a whole month uses 20.7M CU. Several busy isolates could pass 30M; the dashboard's Usage tab shows the real figure.
 
-## What switching would take here
+## The fallback in this app
 
-1. **SIWE token:** sign one with the app wallet (`createSiweMessage` from `viem/siwe`, or `signSiwe` from `@alchemy/x402`). Cache it per isolate and sign again before it expires.
-2. **Transfers:** point `rpcUrl()` in `src/lib/transfers.ts` at `https://x402.alchemy.com/base-mainnet/v2` with the SIWE header. Pay the `402` with `createPaidFetch`; `ExactEvmScheme` already covers `exact` USDC on Base. Check that the SIWE header is still on the paid retry.
-3. **Budget:** a top-up is $1.00, but `MAX_USDC_PER_DATA_CALL` is `0.01`, so `Budget` would refuse it. The top-up needs its own small cap (for example $1 per isolate) and must not count as joke spend.
-4. **Ledger:** add `0x0573c4dA7fC31E944e5FF959fEf3b42199C308B2` as `Alchemy` in `SELLERS`, or a separate infra list. Otherwise top-ups appear as `otherOutUsdc`. They shouldn't count toward `paidUsdc` ("what the jokes actually cost").
-5. **Fallback, if we keep the free key:** try the key first and go to the gateway only when the key reports its limit. We don't yet know what error the key returns when the month's 30M CU run out (see below).
+Implemented 2026-10-17 in `src/lib/alchemy.ts`, used by `src/lib/transfers.ts`.
+
+1. **Key first.** Each call goes to `base-mainnet.g.alchemy.com/v2/<key>`. A `429` pauses the key for 60 s; `403 "Monthly capacity limit exceeded."` pauses it for 15 min. Calls during a pause go straight to the gateway. Other errors (a bad key, say) don't trigger the fallback.
+2. **Gateway, unpaid first.** The app wallet signs a SIWE token (1 h, re-signed 5 min before expiry or after a `401`). With credits on the wallet, the unpaid call is the whole call.
+3. **A top-up only on a `402`.** Gateway calls run one at a time per isolate, so parallel calls can't each buy $1. Before paying, the app claims the day's top-up in D1 (`events`, kind `alchemy.topup`), allowing at most one per 24 h app-wide. A `Budget` caps each top-up at `MAX_USDC_PER_ALCHEMY_TOPUP` (1) and each isolate at `MAX_USDC_ALCHEMY_PER_ISOLATE` (1).
+4. **Accounting.** Payments to `0x0573c4dA…08B2` show up as party `Alchemy`, summed in `infraUsdc` and kept out of `paidUsdc` (joke cost). The x402 client now counts a payment as spent whenever its receipt reports success, even if the response failed: the live top-up settled under a `500`.
+5. **Checks.** `bun run doctor` reports whether the key works and whether the wallet holds gateway credits. `test/alchemy.test.ts` covers the fallback rules.
 
 ## Open questions for Alchemy
 
 - Can x402 credits be linked to an existing dashboard team and its API key, or are they always a separate "agentic account"?
-- Do credits stay with the wallet across SIWE tokens (each expires after 1 h by default)? Do they expire?
-- What does a key-based endpoint return once a free account has used 30M CU in a month (`429`, another code, or a stop until the next month)?
+- Why was our settled $1 top-up (tx `0xaac905…35f4`) never credited? See [the report](alchemy-gateway-topup-not-credited.md).
+- Do credits stay with the wallet across SIWE tokens (each expires after 1 h by default)? Do they expire? Our live test couldn't tell, because the gateway never credited the top-up.
+- Alchemy's [error reference](https://www.alchemy.com/docs/reference/error-reference) gives `403` "Monthly capacity limit exceeded." for the monthly limit. Does that last until the next billing month?
 - Which EVM payee is current: `0x0573c4dA…08B2` (live) or `0x658dc531…81e5` (skill reference)?
 - Is the no-SIWE mode ($0.001 per request) documented, and is it meant to last?
 
@@ -95,6 +99,7 @@ CU figures are from [Compute Unit Costs](https://www.alchemy.com/docs/reference/
 - [AI agents can now use Alchemy autonomously](https://alchemy.com/blog/ai-agents-can-now-sign-up-for-alchemy), Alchemy blog, updated 2026-02-26
 - Agent skill `agentic-gateway` (x402 rules): [overview](https://github.com/alchemyplatform/skills/blob/main/skills/agentic-gateway/rules/x402/overview.md), [authentication](https://github.com/alchemyplatform/skills/blob/main/skills/agentic-gateway/rules/x402/authentication.md), [payment](https://github.com/alchemyplatform/skills/blob/main/skills/agentic-gateway/rules/x402/payment.md), [making requests](https://github.com/alchemyplatform/skills/blob/main/skills/agentic-gateway/rules/x402/making-requests.md), [reference](https://github.com/alchemyplatform/skills/blob/main/skills/agentic-gateway/rules/x402/reference.md)
 - [Compute Unit Costs](https://www.alchemy.com/docs/reference/compute-unit-costs)
+- [Error reference](https://www.alchemy.com/docs/reference/error-reference) and [Throughput](https://www.alchemy.com/docs/reference/throughput)
 - [What is included in the Free tier?](https://support.alchemy.com/articles/5827006872-what-is-included-in-the-free-tier)
 - [Understanding Alchemy's Pay-As-You-Go billing model](https://support.alchemy.com/articles/2300474614-understanding-alchemy-s-pay-as-you-go-billing-model)
 - Live quotes: unpaid `POST https://x402.alchemy.com/base-mainnet/v2`, 2026-10-16 (US time), with no auth, with SIWE from a throwaway wallet and from the app wallet, and with `ALCHEMY_API_KEY` in the path and as `Bearer`

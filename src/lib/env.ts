@@ -12,6 +12,8 @@ interface Bindings {
 	MAX_USDC_PER_DATA_CALL?: string;
 	MAX_USDC_PER_INFERENCE?: string;
 	MAX_USDC_PER_ISOLATE?: string;
+	MAX_USDC_PER_ALCHEMY_TOPUP?: string;
+	MAX_USDC_ALCHEMY_PER_ISOLATE?: string;
 	ORCHESTRATOR_MODEL?: string;
 	JOKE_MODEL?: string;
 	ALCHEMY_API_KEY?: string;
@@ -54,6 +56,13 @@ export const config = {
 	get maxUsdPerIsolate() {
 		return e.MAX_USDC_PER_ISOLATE ?? '5';
 	},
+	/** Alchemy's gateway sells credits in $1 top-ups; a larger quote is refused. */
+	get maxUsdPerAlchemyTopup() {
+		return e.MAX_USDC_PER_ALCHEMY_TOPUP ?? '1';
+	},
+	get maxUsdAlchemyPerIsolate() {
+		return e.MAX_USDC_ALCHEMY_PER_ISOLATE ?? '1';
+	},
 	get runnerLocationHint(): DurableObjectLocationHint {
 		return (e.RUNNER_LOCATION_HINT ?? 'wnam') as DurableObjectLocationHint;
 	},
@@ -69,12 +78,13 @@ export const config = {
 	},
 };
 
-let budgets: { data: Budget; inference: Budget } | null = null;
+let budgets: { data: Budget; inference: Budget; alchemy: Budget } | null = null;
 /** Caps shared by every payment this isolate makes; created on first use. */
 export function getBudgets() {
 	return (budgets ??= {
 		data: new Budget(usdToBaseUnits(config.maxUsdPerDataCall), usdToBaseUnits(config.maxUsdPerIsolate)),
 		inference: new Budget(usdToBaseUnits(config.maxUsdPerInference), usdToBaseUnits(config.maxUsdPerIsolate)),
+		alchemy: new Budget(usdToBaseUnits(config.maxUsdPerAlchemyTopup), usdToBaseUnits(config.maxUsdAlchemyPerIsolate)),
 	});
 }
 
@@ -83,6 +93,18 @@ export function paidDataFetch(label: string) {
 		privateKey: () => config.privateKey,
 		budget: getBudgets().data,
 		maxUsdPerPayment: `$${config.maxUsdPerDataCall}`,
+		label,
+		onReceipt: (ev) => ledger.record(label, ev),
+		onEvent: (ev) => logEvent('x402.payment', ev.ok, ev as unknown as Record<string, unknown>, { label }),
+	});
+}
+
+/** Pays Alchemy's x402 gateway for credits when the free-plan key is out of capacity (src/lib/alchemy.ts). */
+export function paidAlchemyFetch(label: string) {
+	return createPaidFetch({
+		privateKey: () => config.privateKey,
+		budget: getBudgets().alchemy,
+		maxUsdPerPayment: `$${config.maxUsdPerAlchemyTopup}`,
 		label,
 		onReceipt: (ev) => ledger.record(label, ev),
 		onEvent: (ev) => logEvent('x402.payment', ev.ok, ev as unknown as Record<string, unknown>, { label }),
