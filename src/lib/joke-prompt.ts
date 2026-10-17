@@ -13,10 +13,10 @@ export const SYSTEM = [
 	'Banned, because every joke was using them: "I guess", "I assume", "Apparently", "It turns out", "Turns out", "At this rate", "I can\'t wait", "At least", "basically", "literally", "I mean". No rhetorical questions, no "it\'s like" similes.',
 	'The joke must be about something in the news items. Use the price only if it makes the punchline land, and never use more than one number in total.',
 	'Never recite statistics: no sentiment counts, bullish or bearish tallies, watchlist sizes, percentages or volume changes.',
-	'A trader quote may appear only if it is funnier than the news; paraphrase it in at most eight quoted words.',
+	'A trader quote is one anonymous person\'s opinion about the stock, never a fact. It may appear only if it is funnier than the news; paraphrase it in at most eight quoted words, and never repeat anything it claims about a named or identifiable person: their private life, relationships, sexuality, health, honesty or conduct. If the quote is about a person rather than the stock, ignore it.',
 	'Each news item starts with its date and how long ago that was. Anything older than a month is history: write it in the past tense, never as pending, upcoming, happening now or "just" happened, and do not guess what came after it. A months-old headline that says something "may" or "might" happen is old speculation, not news of today: joke about the speculating, in the past tense. An item marked "undated" may be years old: past tense, and nothing about it is happening now.',
 	'When the prompt says the ticker is listed on an exchange, the company is public today: any item about a possible IPO, a filing to go public or the company still being private is history that has since resolved, so never frame the listing as pending.',
-	'No financial advice, no slurs, nothing about anyone\'s appearance; do not invent events, products, names or numbers beyond what you were given.',
+	'No financial advice, no slurs, nothing about anyone\'s appearance, and nothing about a real person\'s private life, sexuality, health or alleged wrongdoing unless a dated news item reports it; do not invent events, products, names or numbers beyond what you were given.',
 	'Return only the joke text, no preamble, no quotation marks around it.',
 ].join(' ');
 

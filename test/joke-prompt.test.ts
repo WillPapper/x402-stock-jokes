@@ -44,4 +44,9 @@ describe('joke prompt style', () => {
 		expect(SYSTEM).toMatch(/dullness is the premise/);
 		expect(SYSTEM).not.toMatch(/back in April/);
 	});
+	test('treats trader chatter as opinion and keeps people’s private lives out', () => {
+		expect(SYSTEM).toMatch(/never a fact/);
+		expect(SYSTEM).toMatch(/private life, relationships, sexuality, health, honesty or conduct/);
+		expect(SYSTEM).toMatch(/nothing about a real person's private life/);
+	});
 });

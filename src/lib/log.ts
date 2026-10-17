@@ -7,7 +7,7 @@
  */
 import { env } from 'cloudflare:workers';
 
-export type EventKind = 'x402.payment' | 'alchemy.fallback' | 'alchemy.topup' | 'gate' | 'ai.turn' | 'error' | 'tool.start' | 'tool.done' | 'tool.error' | 'agent.done';
+export type EventKind = 'x402.payment' | 'alchemy.fallback' | 'alchemy.topup' | 'gate' | 'ai.turn' | 'error' | 'tool.start' | 'tool.done' | 'tool.error' | 'tool.filter' | 'agent.done';
 
 export interface LoggedEvent {
 	ts: string;

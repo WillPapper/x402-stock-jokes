@@ -219,3 +219,7 @@ The page moved from one hand-written `public/index.html` (inline CSS, a 600-line
 ### write_joke ends the turn (2026-10-17)
 
 The orchestrator used to get one more paid turn after `write_joke` to format a reply that nothing read: the joke, status, feed and permalink all come from D1, which the tool had already filled. That turn was the slowest of the run (10 to 60 s, up to 0.13 USDC authorized) and the reason the feed showed a joke a minute before the run said `done`. `write_joke` now returns Flue's `terminate: true` after storing the joke, so the turn ends with the tool batch and the finish hook closes the run right away. The prompt's reply-shape block is gone; failure paths (unknown ticker, failed step) are unchanged and still get a model reply.
+
+### No jokes about people from trader posts (2026-10-17)
+
+An NVDA run turned one StockTwits post's sexual claim about the CEO into a public joke. New `src/lib/chatter.ts` (`safeChatter`) drops quotes about a person's private life, sexuality, health, conduct, and rumour-framed quotes about a person, before `write_joke` builds the prompt or the facts; both prompts now call chatter an anonymous opinion about the stock and ban claims about real people unless a dated news item carries them. The offending row is to be deleted from D1 by hand (no delete path in the app).

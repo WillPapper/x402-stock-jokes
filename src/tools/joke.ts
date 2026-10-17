@@ -7,6 +7,7 @@ import { factsFor, jokeMessages, type JokeInput } from '../lib/joke-prompt.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 import { logEvent } from '../lib/log.ts';
 import { restoreDates, type NewsItem } from '../lib/news.ts';
+import { safeChatter } from '../lib/chatter.ts';
 import { persistJoke } from '../lib/persist.ts';
 import { setStep, stepOutput } from '../lib/runs.ts';
 
@@ -71,7 +72,7 @@ export const writeJoke = (conversationId: string) =>
 	defineTool({
 		name: 'write_joke',
 		description:
-			'Step 3. Pay Cloudflare AI Gateway (x402 machine payments, USDC on Base) to write the joke. Pass news: 2 to 4 one-sentence company news items from search_stock_news (the premise; prefer dated, concrete events); chatter: 0 to 2 trader quotes from fetch_stocktwits_signals, only if funny; price: the latest price; exchange: the exchange from fetch_stocktwits_signals, when it has one. Do not pass counts, tallies, percentages or watchlist sizes. Call this last, exactly once; if it fails, report the failure instead of calling it again.',
+			'Step 3. Pay Cloudflare AI Gateway (x402 machine payments, USDC on Base) to write the joke. Pass news: 2 to 4 one-sentence company news items from search_stock_news (the premise; prefer dated, concrete events); chatter: 0 to 2 trader quotes from fetch_stocktwits_signals, only if funny and about the stock, never a claim about a person; price: the latest price; exchange: the exchange from fetch_stocktwits_signals, when it has one. Do not pass counts, tallies, percentages or watchlist sizes. Call this last, exactly once; if it fails, report the failure instead of calling it again.',
 		input: v.pipe(
 			v.object({
 				symbol: v.pipe(v.string(), v.minLength(1), v.maxLength(12)),
@@ -93,7 +94,13 @@ export const writeJoke = (conversationId: string) =>
 			// reformats them ("Dec 2025:", "undated:"), and an undated fact reads as today's news.
 			const found = await stepOutput<{ results?: NewsItem[] }>(conversationId, 'ceramic');
 			const news = restoreDates(data.news, found?.results ?? []);
-			const input: JokeInput = { ...data, news, symbol, company: data.company ?? listing?.title ?? null, exchange: data.exchange ?? listing?.exchange ?? null };
+			// A trader quote about a person (not the stock) never reaches the model or
+			// the stored facts: a public joke must not repeat a forum post's claim about
+			// someone's private life or conduct.
+			const chatter = safeChatter(data.chatter);
+			if (chatter.dropped.length) logEvent('tool.filter', true, { tool: 'write_joke', dropped: chatter.dropped }, { conversationId, label: 'chatter dropped' });
+			if (!news.length && !chatter.kept.length) throw new Error('write_joke refused: the only material was trader chatter about a person, which this app does not joke about. Do not call write_joke again; tell the user no usable material was found.');
+			const input: JokeInput = { ...data, news, chatter: chatter.kept, symbol, company: data.company ?? listing?.title ?? null, exchange: data.exchange ?? listing?.exchange ?? null };
 			const facts = factsFor(input);
 			logEvent('tool.start', true, { tool: 'write_joke', input: data, facts }, { conversationId, label: 'write_joke' });
 			await setStep(conversationId, 'write_joke', 'running');
