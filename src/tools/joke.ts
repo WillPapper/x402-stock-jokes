@@ -4,6 +4,7 @@ import * as v from 'valibot';
 import { asJson } from '../lib/json.ts';
 import { config, paidInferenceFetch } from '../lib/env.ts';
 import { handoff } from '../lib/drafts.ts';
+import { archivedSteps } from '../lib/archive.ts';
 import { accessFor, insertJoke, jokeForConversation } from '../lib/db.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 import { logEvent } from '../lib/log.ts';
@@ -87,7 +88,8 @@ export const writeJoke = (conversationId: string) =>
 		const symbol = data.symbol.toUpperCase();
 		// The exchange comes from the StockTwits step when the orchestrator leaves it out,
 		// so a listed company is never written up as if its IPO were still pending.
-		const listing = handoff.steps(conversationId)?.stocktwits as { exchange?: string | null } | undefined;
+		const archive = await archivedSteps(conversationId);
+		const listing = archive?.stocktwits as { exchange?: string | null } | undefined;
 		const input: JokeInput = { ...data, symbol, company: data.company ?? handoff.title(symbol), exchange: data.exchange ?? listing?.exchange ?? null };
 		const facts = factsFor(input);
 		logEvent('tool.start', true, { tool: 'write_joke', input: data, facts }, { conversationId, label: 'write_joke' });
@@ -114,7 +116,7 @@ export const writeJoke = (conversationId: string) =>
 					orchestratorModel: config.orchestratorModel,
 					jokeModel: result.model,
 					paidBy: (await accessFor(conversationId).catch(() => null))?.paidBy ?? null,
-					steps: handoff.steps(conversationId),
+					steps: await archivedSteps(conversationId),
 				});
 			}
 		} catch (err) {
