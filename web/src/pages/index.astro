@@ -13,7 +13,7 @@ const description = 'A Flue agent that pays StockTwits, Ceramic and Cloudflare A
 ---
 
 <Base title="Stock Jokes" {description}>
-	<h1>Stock Jokes</h1>
+	<h1><a href="/">Stock Jokes</a></h1>
 	<p class="sub">One joke per ticker. Every step is an x402 micro-payment in USDC on Base: StockTwits for the chatter, Ceramic for the news, Cloudflare AI Gateway for the punchline and for the agent's own turns.</p>
 
 	<JokeForm />
@@ -29,5 +29,8 @@ const description = 'A Flue agent that pays StockTwits, Ceramic and Cloudflare A
 </Base>
 
 <style>
+	/* The title is the way home: it drops a ?run= deep link without a browser back-and-forth. */
+	h1 a { color:inherit; text-decoration:none }
+	h1 a:hover, h1 a:focus-visible { text-decoration:underline }
 	.sub { color:var(--muted); margin:0 0 22px }
 </style>
