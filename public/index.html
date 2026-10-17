@@ -117,7 +117,7 @@
 
   /* ---- under the hood ---- */
   .hood { margin-top:10px; border-top:1px dashed var(--line); padding-top:10px; position:relative }
-  .hood h4 { margin:0 28px 4px 0; font-size:14px }
+  .hood-body h4 { margin:0 28px 4px 0; font-size:14px }
   .hood p { margin:0 0 8px; font-size:14px; color:var(--muted) }
   .hood .close { position:absolute; right:0; top:8px; background:none; border:0; color:var(--muted); font-size:18px; line-height:1; padding:4px 8px; cursor:pointer; border-radius:6px }
   .hood .close:hover { color:var(--fg); background:var(--chip) }
@@ -288,7 +288,7 @@
   };
   const dl = (rows) => `<dl>${rows.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
   function hoodSummary(key, data) {
-    if (!data || data.note) return `<p>${esc(data?.note || 'No data for this step.')}</p>`;
+    if (!data || (data.note && Object.keys(data).length === 1)) return `<p>${esc(data?.note || 'No data for this step.')}</p>`;   // note-only objects are placeholders; tool outputs may carry a note too
     if (key === 'stocktwits') {
       const d = data, st = d.stats || d;
       const quotes = (d.quotes || d.sampleMessages || []).slice(0, 4);
@@ -329,11 +329,22 @@
     }
     return '';
   }
-  function hoodPanel(key, data, extra) {
+  // The panel body is rebuilt in place by fillHood, so an open panel can follow
+  // a running step without closing (the close button and focus stay put).
+  function fillHood(el, key, data, extra) {
     const h = HOOD[key] || { title: key, what: '' };
+    const sig = JSON.stringify(data) + '|' + (extra || '');
+    if (el.dataset.sig === sig) return false;
+    el.dataset.sig = sig;
+    const rawOpen = el.querySelector('details')?.open || false;
+    el.querySelector('.hood-body').innerHTML = `<h4>${esc(h.title)}</h4><p>${esc(h.what)}</p>${hoodSummary(key, data)}<details${rawOpen ? ' open' : ''}><summary>Raw response</summary><pre>${esc(JSON.stringify(data, null, 2) || 'no data')}</pre></details>${extra ? `<div class="links">${extra}</div>` : ''}`;
+    return true;
+  }
+  function hoodPanel(key, data, extra) {
     const el = document.createElement('div');
     el.className = 'hood';
-    el.innerHTML = `<button type="button" class="close" aria-label="Close">×</button><h4>${esc(h.title)}</h4><p>${esc(h.what)}</p>${hoodSummary(key, data)}<details><summary>Raw response</summary><pre>${esc(JSON.stringify(data, null, 2) || 'no data')}</pre></details>${extra ? `<div class="links">${extra}</div>` : ''}`;
+    el.innerHTML = '<button type="button" class="close" aria-label="Close">×</button><div class="hood-body"></div>';
+    fillHood(el, key, data, extra);
     return el;
   }
   function closeHood(container) {
@@ -541,18 +552,35 @@
     timer = setInterval(async () => {
       try {
         const st = await (await fetch(`/joke/${id}`)).json();
-        if (render(st) || Date.now() - runStarted > 300000) { clearInterval(timer); done(); refreshFeed(); setTimeout(() => showRunCost(sym), 4000); }
+        const finished = render(st);
+        refreshStepHood();
+        if (finished || Date.now() - runStarted > 300000) { clearInterval(timer); done(); refreshFeed(); setTimeout(() => showRunCost(sym), 4000); }
       } catch {}
     }, 1500);
   }
   const STEP_KEY = { fetch_stocktwits_signals: 'stocktwits', search_stock_news: 'ceramic', write_joke: 'joke', finished: 'turns' };
+  function stepHoodData(name, key) {
+    let data = key === 'turns' ? runPayments.filter((p) => p.label.includes('orchestrator')) : runOutputs[name];
+    if (!data || (Array.isArray(data) && !data.length)) {
+      const state = dots[name]?.dataset.state || '';
+      data = { note: key === 'turns' ? (state === 'running' ? 'No model turn has settled yet. This list fills in as the agent works.' : 'Model turns are tallied when the agent finishes.')
+        : state === 'running' ? 'This step is running. Its result appears here as soon as it returns.' : state === 'error' ? 'This step did not return a result.' : 'This step has not started yet.' };
+    }
+    const links = runId ? `<a href="/joke/${runId}" target="_blank" rel="noopener">run status JSON</a> · <a href="/api/events?conversation=${runId}" target="_blank" rel="noopener">x402 gateway events</a>` : '';
+    return { data, links };
+  }
+  // Called after every status poll: an open step panel follows the run live.
+  function refreshStepHood() {
+    const panel = $('#steps .hood'); if (!panel) return;
+    const key = panel.dataset.k; const name = Object.keys(STEP_KEY).find((n) => STEP_KEY[n] === key); if (!name) return;
+    const { data, links } = stepHoodData(name, key);
+    fillHood(panel, key, data, links);
+  }
   document.querySelectorAll('#steps li').forEach((li) => {
     const name = li.querySelector('.dot').dataset.step; const key = STEP_KEY[name]; if (!key) return;
     const btn = li.querySelector('.steptitle'); btn.classList.add('clickable'); btn.title = 'See what this step returned';
     const open = () => {
-      let data = key === 'turns' ? runPayments.filter((p) => p.label.includes('orchestrator')) : runOutputs[name];
-      if (!data || (Array.isArray(data) && !data.length)) data = { note: key === 'turns' ? 'Model turns are tallied when the agent finishes.' : 'This step has not returned yet.' };
-      const links = runId ? `<a href="/joke/${runId}" target="_blank" rel="noopener">run status JSON</a> · <a href="/api/events?conversation=${runId}" target="_blank" rel="noopener">x402 gateway events</a>` : '';
+      const { data, links } = stepHoodData(name, key);
       toggleHood($('#steps'), key, data, links, btn, li);
     };
     btn.addEventListener('click', (e) => { e.stopPropagation(); open(); });
