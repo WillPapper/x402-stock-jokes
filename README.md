@@ -12,12 +12,12 @@ One joke per ticker, and every step of making it is an **x402 micro-payment in U
 
 Built with [Flue](https://flueframework.com) (Cloudflare's agent framework) on Workers, Durable Objects and D1, the [x402](https://x402.org) TypeScript client, and three sellers behind Cloudflare's [Monetization Gateway](https://blog.cloudflare.com/monetization-gateway-beta/) / [AI Gateway machine payments](https://developers.cloudflare.com/ai-gateway/features/machine-payments/). The app is itself an x402 seller: submitting a joke without the password costs 0.10 USDC through the Monetization Gateway.
 
-A real run (2026-10-16):
+A real run (2026-10-17):
 
-> NVDA is currently trading at $214.85, and people are losing their minds. One trader is out here questioning if the stock even looks good at that price, while analysts are dreaming of a $10 trillion market cap. I don't know about $10 trillion, but with 671,863 people watching it, it's definitely the most popular kid in school.
+> AstraZeneca is using Salesforce's new AI platform to transform their global customer engagement. I assume that means instead of a doctor calling me, an automated bot will just text me to tell me I'm dying.
 >
-> Based on: NVDA traded at $214.85 on StockTwits with 671,863 people on its watchlist; an analyst sees about 31% upside and TipRanks asks if Nvidia can hit a $10 trillion market cap by 2030.
-> Paid: StockTwits 0.001 USDC [tx](https://basescan.org/tx/0x23107b86878bb565e6f0adfec8ea5e699267417e3401ac67fd086be98dea9b9a), Ceramic 0.001 USDC [tx](https://basescan.org/tx/0xfc277a0f2047ef062676926562a67b377dcd93876f86a74d09ed2a0aabe10c7a), AI Gateway joke ≤ 0.0258 USDC
+> Based on: AstraZeneca picked Salesforce's Agentforce Life Sciences for global customer engagement per its 2026 Connectivity Report (salesforce.com); TCS agreed to buy Salesforce consulting firm Coastal Cloud for $700 million (techcircle.in); Salesforce beat Wall Street forecasts in Q3 FY2026 with AI revenue tripling year over year (IBTimes UK).
+> Paid: StockTwits 0.001 USDC [tx](https://basescan.org/tx/0xeb6698896d6b8e446061c1ebdb08722b698b60b95e56c74803483dd78a20e332), Ceramic 3 × 0.001 USDC ([tx](https://basescan.org/tx/0x8f783699ea4c4c66a0a4a8a97110ddd12adbf7fc56111e91852f4d21c02fbfe0), [tx](https://basescan.org/tx/0x5b3191e15cbc417b2662e946065d2d8df4b878b61d78bc7da882cfd154ff2c01), [tx](https://basescan.org/tx/0xb8c5c0c28849518fa25d7243553caaf086a30f5b37f251639482d28b3aed1a0c)), AI Gateway joke ≤ 0.0257 USDC
 
 ## Architecture
 
@@ -239,6 +239,7 @@ Cost per joke: 0.002 USDC for data plus about 0.014 USDC settled for inference (
 - **Ceramic is lexical and has no date filter.** One `"<TICKER> stock news"` query returns evergreen pages ("5 reasons to buy", quote pages, 2023 analyst round-ups); its index also trails the news by weeks. Following [Ceramic's best practices](https://docs.ceramic.ai/api/search/best-practices), step 2 runs three keyword queries (`<Company> <TICKER> stock news`, `<Company> stock <year>`, `<Company> announces OR unveils OR acquires …`), 20 results each, then `src/lib/news.ts` dedupes, drops listicles, recommendations, quote and filing pages, detects a publish date from the URL or snippet, and ranks dated company events first. Short tickers are kept out of two queries because `NET` matches `.NET` and `cloudflare.net`. The under-the-hood panel shows the queries and what was dropped.
 - **Reply format drift.** The orchestrator sometimes writes `Based:` instead of `Based on:`; the page accepts both. The D1 row uses the facts passed to `write_joke`, not the reply text.
 - **`cf workers secrets bulk` did not set secrets** in this session (it reported success, then `secrets list` was empty); see [docs/cf-secrets-bulk-bug.md](./docs/cf-secrets-bulk-bug.md). `wrangler secret bulk` works.
+- **The joke is stored as soon as `write_joke` returns.** The orchestrator's closing turn only formats the reply, and it can fail (an AI Gateway `504 / 7009 Upstream service unavailable` after five minutes lost a finished AMD joke). `write_joke` inserts the D1 row with the payments so far; the finish hook updates it with the closing turn's payments and the full step archive (`completeJoke`). `GET /joke/<id>` therefore reports `done` about a minute before the conversation JSON has its final message.
 - **`503 facilitator verify returned 403` / `403 disallowed visitor country`** were the visitor-identity check described above, not flakiness; the alarm-driven runner plus D1-served status fixes them. `write_joke` still retries once on a 5xx.
 - **Only `write_joke` may produce the joke.** The agent is told it cannot write jokes itself and may call a tool at most twice per reply; an earlier version retried a failing joke call seven times.
 - **Only one hostname.** Adding the custom domain turned off the `workers.dev` route (requests there get Cloudflare error 1042). Everything, including the password path, goes through `jokes.papper.me`.

@@ -71,6 +71,19 @@ export async function searchNewsFor(symbol: string, companyTitle?: string | null
 	return { symbol: sym, company, query: queries.join(' | '), queries, results: ranked.items, dropped: ranked.dropped, rawCount: raw.length, note, payments: ledger.since(mark) };
 }
 
+/**
+ * What the orchestrator reads. Every extra token here is re-sent on each later
+ * turn and lengthens Qwen's thinking, so: five items, short snippets, no audit
+ * fields. The full NewsSearch goes to the archive and the events log.
+ */
+export function newsForModel(news: NewsSearch) {
+	return {
+		company: news.company,
+		items: news.results.slice(0, 5).map((r) => ({ date: r.date ?? 'undated', title: r.title.slice(0, 120), source: r.source, snippet: r.description.slice(0, 120) || undefined })),
+		note: news.results.length ? 'Newest first; undated items may be old. Pick the 2 or 3 most concrete company events.' : news.note,
+	};
+}
+
 /** Created per conversation so the full response can be stored with the joke. */
 export const searchStockNews = (conversationId: string) =>
 	defineTool({
@@ -89,7 +102,7 @@ export const searchStockNews = (conversationId: string) =>
 		handoff.setStep(conversationId, 'ceramic', news);
 		log.info(`Ceramic: ${news.results.length} of ${news.rawCount} results kept for ${news.company} (${news.queries.length} queries, ${news.payments.length} payment(s))`);
 		logEvent('tool.done', true, { tool: 'search_stock_news', output: news }, { conversationId, label: 'search_stock_news' });
-		return { output: asJson(news) };
+		return { output: asJson(newsForModel(news)) };
 		} catch (err) {
 			logEvent('tool.error', false, { tool: 'search_stock_news', error: (err as Error).message.slice(0, 400) }, { conversationId, label: 'search_stock_news' });
 			throw err;

@@ -183,6 +183,18 @@ export async function fetchStocktwitsSignalsFor(symbol: string): Promise<Stocktw
 	};
 }
 
+/** What the orchestrator reads: company, price, mood, three quotes. The counts stay in the archive. */
+export function signalsForModel(s: StocktwitsSignals) {
+	return {
+		symbol: s.symbol,
+		title: s.title,
+		exchange: s.exchange,
+		latestPrice: s.latestPrice,
+		mood: s.mood,
+		quotes: s.quotes.slice(0, 3).map((q) => q.text.slice(0, 160)),
+	};
+}
+
 /** Created per conversation so the full response can be stored with the joke. */
 export const fetchStocktwitsSignals = (conversationId: string) =>
 	defineTool({
@@ -198,7 +210,7 @@ export const fetchStocktwitsSignals = (conversationId: string) =>
 		handoff.setStep(conversationId, 'stocktwits', signals);
 		log.info(`StockTwits ${signals.symbol}: ${signals.mood}, latest ${signals.latestPrice ?? 'n/a'}, ${signals.quotes.length} quotes; ${signals.payments.length} payment(s)`);
 		logEvent('tool.done', true, { tool: 'fetch_stocktwits_signals', output: signals }, { conversationId, label: 'fetch_stocktwits_signals' });
-		return { output: asJson(signals) };
+		return { output: asJson(signalsForModel(signals)) };
 		} catch (err) {
 			logEvent('tool.error', false, { tool: 'fetch_stocktwits_signals', error: (err as Error).message.slice(0, 400) }, { conversationId, label: 'fetch_stocktwits_signals' });
 			throw err;
