@@ -68,7 +68,7 @@
   #run:not(.done) .run-summary { display:none }
   #run.done:not(.collapsed) .run-summary { margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed var(--line) }
   .steps { list-style:none; padding:0; margin:0; display:grid; gap:12px }
-  .steps li { display:grid; grid-template-columns:26px 1fr auto; gap:10px; align-items:start }
+  .steps > li { display:grid; grid-template-columns:26px 1fr auto; gap:10px; align-items:start }   /* direct children only: hood panels nest their own lists */
   .dot { width:22px; height:22px; border-radius:50%; border:2px solid var(--line); display:grid; place-items:center; font-size:12px; margin-top:2px; color:var(--muted) }
   .dot.running { border-color:var(--warn); animation:pulse 1s infinite }
   .dot.done { border-color:var(--ok); background:var(--ok); color:#fff }
