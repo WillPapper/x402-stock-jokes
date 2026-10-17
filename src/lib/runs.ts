@@ -7,6 +7,7 @@
 import { env } from 'cloudflare:workers';
 import { jokeForConversation } from './db.ts';
 import type { PaymentRecord } from './ledger.ts';
+import { redactAccountIds } from './redact.ts';
 import { statusOf, type RunStatus } from './status.ts';
 
 export type RunState = 'queued' | 'running' | 'done' | 'failed';
@@ -75,7 +76,8 @@ function parse(r: RawRun): RunRow {
 		paidBy: (r.paid_by as RunRow['paidBy']) ?? null,
 		amountUsdc: r.amount_usdc,
 		stepStates: parseJson(r.step_states, {}),
-		steps: parseJson(r.steps, null),
+		// Step archives converted from jokes written before 2026-10-17 carry the account id in payment URLs.
+		steps: redactAccountIds(parseJson(r.steps, null)),
 		turns: r.turns ?? 0,
 		lastError: r.last_error,
 		failedStep: r.failed_step,
