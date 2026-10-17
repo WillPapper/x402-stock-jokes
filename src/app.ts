@@ -12,7 +12,8 @@ import { amountsByHash, summarize, walletTransfers, type Transfer } from './lib/
 import { config, paidInferenceFetch } from './lib/env.ts';
 import { ledger } from './lib/ledger.ts';
 import { listEvents, logEvent } from './lib/log.ts';
-import { redactAccountIds, requireInternal } from './lib/internal.ts';
+import { requireInternal } from './lib/internal.ts';
+import { redactAccountIds } from './lib/redact.ts';
 import { PERMIT2, USDC_BASE, walletFromKey } from './lib/x402.ts';
 import { tickerKnown } from './tools/stocktwits.ts';
 

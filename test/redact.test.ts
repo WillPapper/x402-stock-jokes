@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { redactAccountIds } from '../src/lib/internal.ts';
+import { redactAccountIds } from '../src/lib/redact.ts';
 
 describe('redactAccountIds', () => {
 	test('replaces the account id inside Cloudflare API URLs, wherever it is nested', () => {
