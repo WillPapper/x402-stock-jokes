@@ -12,6 +12,7 @@ import { amountsByHash, summarize, walletTransfers, type Transfer } from './lib/
 import { config, paidInferenceFetch } from './lib/env.ts';
 import { ledger } from './lib/ledger.ts';
 import { listEvents, logEvent } from './lib/log.ts';
+import { redactAccountIds, requireInternal } from './lib/internal.ts';
 import { PERMIT2, USDC_BASE, walletFromKey } from './lib/x402.ts';
 import { tickerKnown } from './tools/stocktwits.ts';
 
@@ -228,13 +229,13 @@ app.get('/api/jokes', async (c) => {
 	const after = c.req.query('after') || undefined;
 	const before = c.req.query('before') || undefined;
 	const limit = Number(c.req.query('limit') ?? 30);
-	return c.json({ jokes: await withSettled(await listJokes({ after, before, limit })), serverTime: new Date().toISOString() });
+	return c.json(redactAccountIds({ jokes: await withSettled(await listJokes({ after, before, limit })), serverTime: new Date().toISOString() }));
 });
 app.get('/api/jokes/latest', async (c) => {
 	const ticker = (c.req.query('ticker') ?? '').toUpperCase().replace(/[^A-Z0-9.]/g, '');
 	if (!ticker) return c.json({ error: 'ticker query parameter required' }, 400);
 	const joke = await latestJokeFor(ticker);
-	return joke ? c.json({ joke: (await withSettled([joke]))[0] }) : c.json({ joke: null }, 404);
+	return joke ? c.json(redactAccountIds({ joke: (await withSettled([joke]))[0] })) : c.json({ joke: null }, 404);
 });
 app.get('/api/stats', async (c) => {
 	const stats = await jokeStats();
@@ -270,7 +271,12 @@ app.get('/api/wallet', async (c) => {
 	}
 });
 
-app.get('/api/ledger', (c) => c.json({ payments: ledger.all() }));
+app.get('/api/ledger', (c) => c.json(redactAccountIds({ payments: ledger.all() })));
+
+// Internal diagnostics: behind Cloudflare Access (see src/lib/internal.ts). They
+// expose visitor IPs, countries and the raw gateway exchanges, so never public.
+app.use('/api/events', requireInternal);
+app.use('/api/_trace', requireInternal);
 
 // Diagnostic: how do Cloudflare-fronted endpoints see a subrequest made from this
 // Worker while handling YOUR request? Compares your visitor identity with what

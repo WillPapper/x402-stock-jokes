@@ -124,7 +124,13 @@ Every gateway interaction is logged as one JSON line (Workers Logs) and stored i
 - `ai.turn`: each orchestrator model turn with usage, finish reason and ids.
 - `error`: tool failures at agent finish.
 
-Read them with `GET /api/events?conversation=<id>`, `?failures=1`, `?kind=x402.payment`, `?since=<iso>`, or live with `bunx wrangler tail x402-stock-jokes --format json`. To report a bug to Cloudflare, send the event JSON for the conversation: it has the `cf-ray` and `cf-aig-*` ids, the quote `jti`, the payer address, the tx hash and the exact timestamps. `GET /api/_trace` shows what a subrequest from the Worker looks like to Cloudflare-fronted endpoints.
+Read them with `GET /api/events?conversation=<id>`, `?failures=1`, `?kind=x402.payment`, `?since=<iso>`, or live with `bunx wrangler tail x402-stock-jokes --format json`. `/api/events` and `/api/_trace` are **internal**: they hold visitor IPs, countries and raw gateway exchanges, so they sit behind a Cloudflare Access self-hosted application (Allow policy for the owner's email, Service Auth policy for a service token), and the Worker verifies the `Cf-Access-Jwt-Assertion` JWT itself (`src/lib/internal.ts`; team domain and AUD tag in `wrangler.jsonc` vars, empty AUD = 403). In a browser the page's "x402 gateway events" links go through the Access login; from a script send the service token headers:
+
+```sh
+curl -H "CF-Access-Client-Id: <client_id>" -H "CF-Access-Client-Secret: <client_secret>" "https://jokes.papper.me/api/events?limit=20"
+```
+
+Public responses (`/api/jokes`, `/api/jokes/latest`, `/api/ledger`) have the Cloudflare account id redacted from AI Gateway URLs; D1 and Workers Logs keep the full URL. To report a bug to Cloudflare, send the event JSON for the conversation: it has the `cf-ray` and `cf-aig-*` ids, the quote `jti`, the payer address, the tx hash and the exact timestamps. `GET /api/_trace` shows what a subrequest from the Worker looks like to Cloudflare-fronted endpoints.
 
 ## The page
 

@@ -14,7 +14,12 @@
 		"MAX_USDC_PER_DATA_CALL": "0.01",
 		"MAX_USDC_PER_INFERENCE": "0.25",
 		"MAX_USDC_PER_ISOLATE": "5",
-		"RUNNER_LOCATION_HINT": "wnam"
+		"RUNNER_LOCATION_HINT": "wnam",
+		// /api/events and /api/_trace sit behind a Cloudflare Access self-hosted app;
+		// the Worker verifies the Access JWT against this team domain and AUD tag.
+		// Empty AUD = those routes answer 403 (fail closed). See README "Logging".
+		"ACCESS_TEAM_DOMAIN": "https://papper.cloudflareaccess.com",
+		"ACCESS_AUD": ""
 	},
 	// public/ is served as static assets (the page); agent and API routes run
 	// on the Worker first.
