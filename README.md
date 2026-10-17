@@ -44,11 +44,20 @@ A real run (2026-10-16):
       ▼
   D1 (jokes, events)   ◀── GET /joke/<id> polls here, never the agent; feed and stats read here too
 
-  Money:  buyer wallet ──0.10──▶ app wallet ──┬──▶ StockTwits   0.001 per joke
-                                             ├──▶ Ceramic      0.001 per joke
-                                             └──▶ AI Gateway   a few thousandths per joke
-          all USDC on Base, signed by the app wallet behind a Budget cap (src/lib/budget.ts),
-          verified later from the chain via Alchemy (/api/stats)
+  Money, per joke (USDC on Base; averages over the 21 jokes in D1 on 2026-10-17):
+
+    buyer ──0.100──▶ app wallet ──▶ StockTwits    0.001   exact: charged as quoted
+                                ──▶ Ceramic       0.001   exact: charged as quoted
+                                ──▶ AI Gateway    0.55    upto: the ceiling the wallet signs
+                                                          (4-5 turns × 0.131 + joke call 0.026)
+                                                  0.014   what AI Gateway actually settles (0.009-0.026)
+
+    in 0.100  →  out 0.016 on average (worst seen 0.028)  →  margin 0.084, about 84%
+
+    The ceiling is never charged, only held in flight, so the wallet needs about 0.6 USDC
+    of headroom per joke. If a joke were ever charged its full ceiling it would lose 0.45.
+    Caps in src/lib/budget.ts refuse anything above wrangler.jsonc's limits before signing;
+    the settled figures come from the wallet's on-chain history via Alchemy (/api/stats).
 ```
 
 The runner exists because Cloudflare's gateways are US-only and judge the visitor whose request is in flight; an alarm has no visitor, so every paid call leaves from a US Durable Object with nobody attached (see [Where the agent runs](#where-the-agent-runs-and-why-it-matters)).
@@ -218,11 +227,11 @@ scripts/                       wallet:new, approve, doctor, pay-for-joke
 
 Models: the orchestrator is `alibaba/qwen3.8-27b` (best multi-step tool use of the four machine-payment models) and the joke writer is `google/gemma-4-26b-a4b-it` (top of the four on creative-writing benchmarks). Both are thinking models; the joke call turns thinking off via `chat_template_kwargs.enable_thinking=false`, while the orchestrator keeps it on (without it Qwen asked for ticker confirmation instead of calling tools; the price is a slow final turn). Change either model in `wrangler.jsonc` vars.
 
-Cost per joke: about 0.002 USDC for data plus a few thousandths of a USDC settled for inference. AI Gateway quotes a *ceiling* per call against the model's full context window (about 0.13 USDC per Qwen turn, 0.026 per Gemma call), so the wallet must hold roughly 0.5 USDC of headroom even though far less is charged.
+Cost per joke: 0.002 USDC for data plus about 0.014 USDC settled for inference (mean over the first 21 jokes, range 0.009 to 0.026), against the 0.10 USDC a buyer pays. AI Gateway quotes a *ceiling* per call against the model's full context window (about 0.13 USDC per Qwen turn, 0.026 per Gemma call), so the wallet must hold roughly 0.5 USDC of headroom even though far less is charged.
 
 ## Operational notes
 
-- **Wallet headroom.** One joke reserves roughly 0.55 USDC in flight while a few thousandths settle. Keep at least 1 USDC in the wallet or the facilitator refuses with `verify returned 403`.
+- **Wallet headroom.** One joke reserves roughly 0.55 USDC in flight while about 0.015 USDC settles. Keep at least 1 USDC in the wallet or the facilitator refuses with `verify returned 403`.
 - **AI Gateway settles per call, on-chain, for the real token cost** (fractions of a cent, never the ceiling), but returns no `PAYMENT-RESPONSE` receipt. `/api/transfers` lists the settlements.
 - **Secrets are read lazily on purpose.** Workers validate the module at upload time before any secret exists, so nothing in `src/lib/` touches a secret at import. Keep it that way when adding code, or `wrangler deploy` fails with error 10021.
 - **Base RPC rate limits.** Public Base RPCs return 429 to Cloudflare's edge under light load; `/api/wallet` rotates through several and falls back to address-only. Set `BASE_RPC_URL` for the scripts if `mainnet.base.org` throttles you locally.
