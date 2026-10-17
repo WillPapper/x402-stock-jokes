@@ -71,6 +71,15 @@ export async function insertJoke(row: Omit<JokeRow, 'id' | 'createdAt'> & { id?:
 	return full;
 }
 
+/** Finish a row written by write_joke: the agent's closing turn adds its own payments and the archived steps. */
+export async function completeJoke(conversationId: string, patch: { payments: PaymentRecord[]; totalAuthorizedUsdc: string; steps: Record<string, unknown> | null }): Promise<boolean> {
+	const res = await db()
+		.prepare('UPDATE jokes SET payments = ?2, total_authorized_usdc = ?3, steps = COALESCE(?4, steps) WHERE conversation_id = ?1')
+		.bind(conversationId, JSON.stringify(patch.payments), patch.totalAuthorizedUsdc, patch.steps ? JSON.stringify(patch.steps) : null)
+		.run();
+	return (res.meta?.changes ?? 0) > 0;
+}
+
 /**
  * Newest first. With `after`, only rows created after that ISO timestamp (oldest
  * first, for appending); with `before`, only rows created before it (newest

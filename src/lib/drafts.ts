@@ -5,6 +5,7 @@
 const drafts = new Map<string, JokeDraft>();
 const steps = new Map<string, Record<string, unknown>>();
 const titles = new Map<string, string>();
+const marks = new Map<string, number>();
 
 export interface JokeDraft {
 	symbol: string;
@@ -24,10 +25,19 @@ export const handoff = {
 	setStep: (conversationId: string, name: 'stocktwits' | 'ceramic' | 'joke', output: unknown) => {
 		steps.set(conversationId, { ...(steps.get(conversationId) ?? {}), [name]: output });
 	},
+	steps: (conversationId: string) => steps.get(conversationId) ?? null,
 	takeSteps: (conversationId: string) => {
 		const s = steps.get(conversationId) ?? null;
 		steps.delete(conversationId);
 		return s;
+	},
+	/** Ledger position when the conversation started, so tools can total its payments so far. */
+	setMark: (conversationId: string, mark: number) => marks.set(conversationId, mark),
+	mark: (conversationId: string) => marks.get(conversationId) ?? 0,
+	takeMark: (conversationId: string) => {
+		const m = marks.get(conversationId) ?? 0;
+		marks.delete(conversationId);
+		return m;
 	},
 	setTitle: (symbol: string, title: string) => titles.set(symbol.toUpperCase(), title),
 	title: (symbol: string) => titles.get(symbol.toUpperCase()) ?? null,

@@ -165,7 +165,7 @@ function cleanSnippet(s: string, title: string): string {
 	if (title && t.toLowerCase().startsWith(title.toLowerCase().slice(0, 30))) t = t.slice(title.length).trim();
 	t = t.replace(/^[\s|·\-–—:]+/, '');
 	if (/^(benzinga|skip to|home news|search|menu|sign in|log in|subscribe)\b/i.test(t) || /benzinga research my stocks/i.test(t)) return '';
-	return t.slice(0, 240);
+	return t.slice(0, 180);
 }
 
 const EVENT_WORDS = /\b(announces?|announced|unveils?|unveiled|launch(es|ed)?|acquires?|acquisition|partnership|partners? with|deal|lawsuit|sued|fined?|probe|investigation|regulators?|outage|recall|layoffs?|cuts? jobs|hires?|departure|resigns?|steps down|names? (new )?ceo|earnings|quarter|revenue|guidance|beats?|misses?|rallies|surges?|jumps?|plunges?|falls?|slides?|tumbles|soars?|record|strike|union|antitrust|ban|approval|fda|delay|shortage|expands?|opens?|closes?|shuts?|invests?|investment|buyback|dividend|split|ipo|merger)\b/i;
@@ -216,7 +216,9 @@ export function rankNews(raw: RawNews[], opts: { company: string; symbol: string
 		} catch {
 			/* keep empty */
 		}
-		if (JUNK_HOSTS.test(host) || /^xml\b/i.test(desc) || /\.(xml|rss)$/i.test(path) || /\/feed\/?$/i.test(path) || !/^https?:/.test(url)) {
+		const letters = title.replace(/[^A-Za-z]/g, '');
+		const allCaps = letters.length > 12 && letters === letters.toUpperCase(); // decades-old wire copy
+		if (allCaps || JUNK_HOSTS.test(host) || /^xml\b/i.test(desc) || /\.(xml|rss)$/i.test(path) || /\/feed\/?$/i.test(path) || !/^https?:/.test(url)) {
 			dropped.junk++;
 			continue;
 		}

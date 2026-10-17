@@ -1,7 +1,7 @@
 'use agent';
 import { useAgentFinish, useAgentStart, useModel, useResponseFinish, useResponseStart, useTool } from '@flue/runtime';
 import { X402_PROVIDER_ID } from '../lib/ai-gateway-provider.ts';
-import { accessFor, insertJoke } from '../lib/db.ts';
+import { accessFor, completeJoke, insertJoke } from '../lib/db.ts';
 import { handoff } from '../lib/drafts.ts';
 import { config } from '../lib/env.ts';
 import { ledger } from '../lib/ledger.ts';
@@ -10,8 +10,6 @@ import { whereAmI } from '../cloudflare.ts';
 import { searchStockNews } from '../tools/ceramic.ts';
 import { writeJoke } from '../tools/joke.ts';
 import { fetchStocktwitsSignals } from '../tools/stocktwits.ts';
-
-const marks = new Map<string, number>();
 
 // Joke is the agent's durable identity: it names the generated Durable Object
 // class (FlueJokeAgent) and the migration entry in wrangler.jsonc.
@@ -27,7 +25,7 @@ export function Joke({ id }: { id: string }) {
 	// Attach every payment made during this response to the reply's metadata,
 	// and store the finished joke in D1 for the feed and the cache.
 	useAgentStart(async () => {
-		marks.set(id, ledger.mark());
+		handoff.setMark(id, ledger.mark());
 		conversationScope.set(id);
 		const where = await whereAmI();
 		logEvent('gate', where.loc === 'US', { probe: 'agent', agentColo: where.colo, agentCountry: where.loc }, { conversationId: id, label: 'agent colo' });
@@ -47,10 +45,15 @@ export function Joke({ id }: { id: string }) {
 			logEvent('agent.done', false, { reason: failedTools.length ? `tool failures: ${failedTools.join(', ')}` : 'finished without a joke' }, { conversationId: id, label: 'agent done' });
 			return;
 		}
-		const payments = ledger.since(marks.get(id) ?? 0);
-		marks.delete(id);
+		const payments = ledger.since(handoff.takeMark(id));
 		const total = payments.reduce((sum, p) => sum + Number(p.authorizedUsdc), 0).toFixed(6);
 		try {
+			// write_joke already stored the row; add the closing turn's payments and the full step archive.
+			if (await completeJoke(id, { payments, totalAuthorizedUsdc: total, steps: handoff.takeSteps(id) })) {
+				log.info(`completed joke for ${draft.symbol} (${payments.length} payments, ${total} USDC authorized)`);
+				logEvent('agent.done', true, { ticker: draft.symbol, payments: payments.length }, { conversationId: id, label: 'agent done' });
+				return;
+			}
 			const row = await insertJoke({
 				conversationId: id,
 				ticker: draft.symbol,

@@ -4,6 +4,7 @@ import * as v from 'valibot';
 import { asJson } from '../lib/json.ts';
 import { config, paidInferenceFetch } from '../lib/env.ts';
 import { handoff } from '../lib/drafts.ts';
+import { accessFor, insertJoke, jokeForConversation } from '../lib/db.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 import { logEvent } from '../lib/log.ts';
 import { factsFor, jokeMessages, type JokeInput } from '../lib/joke-prompt.ts';
@@ -91,6 +92,30 @@ export const writeJoke = (conversationId: string) =>
 		handoff.setDraft(conversationId, { symbol, facts, joke: result.joke, model: result.model });
 		handoff.setStep(conversationId, 'joke', { ...result, input: data, facts, promptFacts: facts });
 		log.info(`Joke from ${result.model}: ${result.joke.slice(0, 80)}…`);
+		// Store the joke now. The agent's closing turn only formats a reply, and
+		// if that turn fails (AI Gateway 504 after five minutes has happened) the
+		// paid-for joke must not vanish with it; the finish hook then tops up the
+		// payments and the archived steps.
+		try {
+			if (!(await jokeForConversation(conversationId))) {
+				const payments = ledger.since(handoff.mark(conversationId));
+				await insertJoke({
+					conversationId,
+					ticker: symbol,
+					title: handoff.title(symbol),
+					joke: result.joke,
+					facts,
+					payments,
+					totalAuthorizedUsdc: payments.reduce((sum, p) => sum + Number(p.authorizedUsdc), 0).toFixed(6),
+					orchestratorModel: config.orchestratorModel,
+					jokeModel: result.model,
+					paidBy: (await accessFor(conversationId).catch(() => null))?.paidBy ?? null,
+					steps: handoff.steps(conversationId),
+				});
+			}
+		} catch (err) {
+			logEvent('error', false, { where: 'write_joke', error: `store failed: ${(err as Error).message.slice(0, 300)}` }, { conversationId, label: 'store joke' });
+		}
 		logEvent('tool.done', true, { tool: 'write_joke', output: { ...result, input: data, facts, promptFacts: facts } }, { conversationId, label: 'write_joke' });
 		return { output: asJson({ ...result, facts }) };
 		} catch (err) {
