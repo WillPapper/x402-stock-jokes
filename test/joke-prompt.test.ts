@@ -35,3 +35,13 @@ describe('joke prompt', () => {
 		]);
 	});
 });
+
+describe('joke prompt style', () => {
+	test('bans the stock openers and the "Back in" template', () => {
+		expect(SYSTEM).toMatch(/"I guess"/);
+		expect(SYSTEM).toMatch(/"Back in"/);
+		expect(SYSTEM).toMatch(/one concrete image/);
+		expect(SYSTEM).toMatch(/dullness is the premise/);
+		expect(SYSTEM).not.toMatch(/back in April/);
+	});
+});

@@ -74,7 +74,7 @@ export function Joke({ id }: { id: string }) {
 		'When the user names a ticker, run these three steps in order, every time:',
 		'1. fetch_stocktwits_signals with the ticker. Note the title, latestPrice and quotes.',
 		'2. search_stock_news with the ticker and that title. It returns company news items, newest first, each with a date, title and source.',
-		'3. write_joke immediately, without deliberating: news = the first 2 or 3 items as "<date>: <title>" (trim the title to the event itself, drop site names and tickers from it); chatter = one quote from step 1 only if it is obviously funny, otherwise none; price = latestPrice. Skip an item only if it is a buying recommendation or a listicle.',
+		'3. write_joke immediately, without deliberating: news = the first 2 or 3 items as "<date>: <title>", the date copied exactly as the tool printed it (trim the title to the event itself, drop site names and tickers from it); chatter = one quote from step 1 only if it is obviously funny, otherwise none; price = latestPrice. Skip an item only if it is a buying recommendation or a listicle.',
 		'Never pass or mention watchlist counts, bullish or bearish tallies, sentiment or volume changes: they do not make jokes. If step 2 finds no usable news, pass the chatter and price alone.',
 		'Do not reply to the user until write_joke has returned a joke. Writing a joke without calling write_joke is a failure.',
 		'',

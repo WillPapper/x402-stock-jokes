@@ -24,7 +24,7 @@ export interface NewsItem {
 	description: string;
 }
 
-export type DropReason = 'duplicate' | 'listicle' | 'index' | 'junk' | 'off-topic' | 'stale' | 'undated' | 'old';
+export type DropReason = 'duplicate' | 'listicle' | 'index' | 'notice' | 'junk' | 'off-topic' | 'stale' | 'undated' | 'old';
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 const CORPORATE_SUFFIX = /[,\s]+(inc|incorporated|corp|corporation|co|company|ltd|limited|plc|llc|holdings?|group|sa|nv|ag|se)\.?$/i;
@@ -83,6 +83,8 @@ const LISTICLE = [
 	/\bbelongs in your portfolio\b|\bmillionaire\b|\bget rich\b|\bmake you rich\b/i,
 	/\bvs\.?\b.{0,40}\bwhich (is|stock)\b/i,
 	/\bstocks? (stand out|in the spotlight|on investors'? radar)\b/i,
+	/\b(share|stock) price (projections?|predictions?|forecasts?|outlook)\b|\b(predicts?|projects?|forecasts?)\b.{0,40}\b(shares?|stock|price)\b.{0,30}\b(reach|hit|climb|rise|fall|double|triple)\b/i,
+	/\b(will|could|can|may)\b.{0,24}\b(stock|shares|price) (reach|hit|double|triple|soar|crash)\b/i,
 ];
 const INDEX_PAGE = [
 	/\b(token|coin) price\b|\blive chart\b|\bprice prediction\b|\bpenny alerts?\b/i,
@@ -97,6 +99,24 @@ const INDEX_PAGE = [
 	/\bwikipedia\b|\boptions? etp\b|\bcfd\b/i,
 	/\b(stock quote|options? chain|stock chart|dividend history|earnings date|short interest|institutional ownership)\b/i,
 	/\b(news|headlines|updates) - [\w .&'’]+$/i,
+	/\bstock analysis\b|\bofficial announcements\b|\bour latest articles\b|\bcomprehensive analysis\b|\blatest market movement\b|\bmarket performance and\b|\bfuture prospects\b/i,
+	/\b(stock|share) price:/i,
+];
+/**
+ * Routine notices and paid placements that read like news but never make a
+ * joke: 13F holdings write-ups ("Graney King LLC grows stock position in
+ * Costco"), law-firm class-action solicitations, earnings-date and conference
+ * notices, dividend declarations, proxy filings.
+ */
+const NOTICE = [
+	/\b(llc|l\.?p\.?|advisors?|advisory|management|wealth|trust|bank|capital|partners|investments?|asset|fund|financial|insurance|pension)\b.{0,30}\b(grows|raises|increases|boosts|trims|cuts|reduces|lowers|sells|buys|purchases|acquires|has|holds|takes|adds to|exits|lifts|ups|slashes|unloads|invests)\b.{0,16}\b(position|stake|holdings?|shares)\b/i,
+	/\b(stock|equity) position\b|\b(sold|bought|purchased|acquired|sells|buys|purchases|acquires) [\d,.]+ (million |thousand )?shares\b|\bshares (sold|bought|purchased|acquired) by\b/i,
+	/\bclass action\b|\bsecurities (fraud )?(lawsuit|litigation|investigation|claims?)\b|\b(shareholder|investor) (alert|notice|reminder|deadline)\b|\blead plaintiff\b|\blost money\b|\bencourages (investors|shareholders)\b|\binvestors (with|who)\b.{0,30}\bloss(es)?\b/i,
+	/\b(kessler topaz|rosen law|pomerantz|levi & korsinsky|bragar eagel|glancy prongay|hagens berman|schall law|faruqi|robbins geller|bernstein liebhard|gross law|johnson fistel|block & leviton|kahn swick|wolf haldenstein)\b/i,
+	/\b(schedules?|sets? (the )?date|to (announce|report|release|host|hold|webcast|present|discuss)|announces? (the )?(date|timing)|will (announce|report|release|host))\b.{0,60}\b(results|earnings|conference call|webcast|call|conference|meeting)\b/i,
+	/\b(declares?|announces?|approves?|raises?)\b.{0,24}\b(quarterly |monthly |annual |semi-annual |special )?(cash )?dividend\b/i,
+	/\bproxy( statement)?\b|\b(shareholders?'?|stockholders?'?) meeting\b/i,
+	/\bto (participate|present|speak) (in|at)\b.{0,50}\b(conference|summit|forum)\b/i,
 ];
 const JUNK_HOSTS = /(^|\.)(urlscan\.io|wikipedia\.org|defenseworld\.net|marketbeat\.com|simply-invest\.info|spreaker\.com|feedburner\.com)$/i;
 const INDEX_PATH = /\/(quote|quotes|symbol|symbols|stocks?|company|companies|news|forecasts?)\/[A-Za-z0-9.\-]+\/?$|\/(news|blog|feed)\/?$/i;
@@ -164,6 +184,50 @@ export function detectDate(url: string, text: string, now = new Date(), title = 
 	return candidates.sort().at(-1)!;
 }
 
+/**
+ * The year a title says it reports on: "Lyft Announces Results for First Quarter 2024",
+ * "Fourth Quarter and Full-Year 2023 Results", "Q3 FY2025 earnings". Null when the
+ * title carries no such period.
+ */
+export function reportedYear(title: string): number | null {
+	const m = /\b(?:q[1-4]|(?:first|second|third|fourth)[- ]quarter|full[- ]year|fiscal(?: year)?|fy|half[- ]year|h[12])\s*(?:and (?:full[- ]year|fiscal(?: year)?)\s*)?(?:fy)?\s*(20\d{2})\b(?:\s+(?:results|earnings|financial results|report))?/i.exec(title) ?? /\b(20\d{2}) (?:results|annual report|financial results)\b/i.exec(title);
+	return m ? Number(m[1]) : null;
+}
+
+/**
+ * Puts the dates back on the news lines the orchestrator hands to write_joke.
+ * The orchestrator copies "2026-02: Lyft stock drops" faithfully most of the
+ * time, but it also writes "Dec 2025:", "undated:" or no date at all; this
+ * matches each line to the ranked Ceramic item it was trimmed from (word
+ * overlap) and uses that item's date, so the joke model always sees how old a
+ * fact is. Lines that already start with a numeric date are left alone.
+ */
+export function restoreDates(news: string[], items: Pick<NewsItem, 'title' | 'date'>[]): string[] {
+	const tokens = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9$&]+/g, ' ').split(' ').filter((w) => w.length > 2 && !STOPWORDS.has(w)));
+	const indexed = items.map((i) => ({ date: i.date, words: tokens(i.title) }));
+	return news.map((line) => {
+		const m = /^\s*(?:(\d{4}(?:-\d{2}){0,2})|([a-z]{3,9}\.?\s+\d{4})|(undated|n\/a|unknown|no date))?\s*:?\s*(.*)$/is.exec(line);
+		if (!m) return line;
+		const [, numeric, monthName, , rest = ''] = m;
+		if (numeric && rest) return `${numeric}: ${rest.trim()}`;
+		const monthIdx = monthName ? monthIndex(monthName.split(/\s+/)[0] ?? '') : -1;
+		// "Tesla 2026: deep tech" looks like a month name but is not one: keep the whole line.
+		const body = (monthName && monthIdx < 0 ? line : rest || line).trim();
+		const words = tokens(body);
+		let best: { date: string | null; overlap: number } | null = null;
+		for (const item of indexed) {
+			let shared = 0;
+			for (const w of words) if (item.words.has(w)) shared++;
+			const overlap = words.size ? shared / Math.min(words.size, item.words.size || 1) : 0;
+			if (shared >= 3 && overlap >= 0.5 && (!best || overlap > best.overlap)) best = { date: item.date, overlap };
+		}
+		if (best?.date) return `${best.date}: ${body}`;
+		if (monthName && monthIdx >= 0) return `${monthName.split(/\s+/)[1]}-${pad(monthIdx + 1)}: ${body}`;
+		return numeric ? line : `undated: ${body}`;
+	});
+}
+const STOPWORDS = new Set(['the', 'and', 'for', 'its', 'with', 'from', 'that', 'this', 'into', 'after', 'over', 'amid', 'says', 'said', 'stock', 'shares', 'news', 'inc', 'corp', 'nyse', 'nasdaq', 'company']);
+
 function canonical(url: string): string {
 	try {
 		const u = new URL(url);
@@ -211,7 +275,7 @@ export const SPREAD_DAYS = 270;
 export function rankNews(raw: RawNews[], opts: { company: string; symbol: string; now?: Date; limit?: number }): RankedNews {
 	const now = opts.now ?? new Date();
 	const limit = opts.limit ?? 6;
-	const dropped: Record<DropReason, number> = { duplicate: 0, listicle: 0, index: 0, junk: 0, 'off-topic': 0, stale: 0, undated: 0, old: 0 };
+	const dropped: Record<DropReason, number> = { duplicate: 0, listicle: 0, index: 0, notice: 0, junk: 0, 'off-topic': 0, stale: 0, undated: 0, old: 0 };
 	const seen = new Set<string>();
 	const company = opts.company.toLowerCase();
 	const companyFirst = company.split(/\s+/)[0] ?? company;
@@ -263,7 +327,16 @@ export function rankNews(raw: RawNews[], opts: { company: string; symbol: string
 			dropped.index++;
 			continue;
 		}
-		const date = detectDate(url, `${title} ${desc}`, now, title);
+		if (NOTICE.some((re) => re.test(title))) {
+			dropped.notice++;
+			continue;
+		}
+		let date = detectDate(url, `${title} ${desc}`, now, title);
+		// A re-published press release carries the aggregator's date in its URL
+		// ("Lyft Announces Results for First Quarter 2024", dated 2026-03-16 by
+		// greenstocknews.com). The period in the title is the honest date.
+		const reported = reportedYear(title);
+		if (date && reported !== null && reported < Number(date.slice(0, 4)) - 1) date = String(reported);
 		let ageDays: number | null = null;
 		if (date) {
 			const [y, m, d] = date.split('-').map(Number);

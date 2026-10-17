@@ -147,3 +147,103 @@ describe('rankNews recency gate', () => {
 		expect(r.dropped.old).toBe(1);
 	});
 });
+
+import { reportedYear, restoreDates } from '../src/lib/news.ts';
+
+describe('notices and re-published press releases', () => {
+	const raw = (title: string, url: string, description = '') => ({ title, url, description });
+	test('drops 13F write-ups, law-firm class actions, earnings-date notices, dividends and proxies as notices', () => {
+		const r = rankNews(
+			[
+				raw('Graney King LLC Grows Stock Position in Costco Wholesale Corporation $COST', 'https://techdows.com/2025/08/28/graney-king'),
+				raw('HBW Advisory Services LLC Sells 3,239 Shares of Costco Wholesale', 'https://x.com/2025/09/14/hbw'),
+				raw('Costco Wholesale (COST) Class Action Lawsuit Filed by Kessler Topaz Meltzer & Check, LLP', 'https://www.prnewswire.com/news-releases/costco-2026-04-06.html'),
+				raw('Costco schedules Q2 fiscal 2026 earnings release for Dec. 10', 'https://www.stocktitan.net/news/COST/costco-sets-the-date-2026-01-15.html'),
+				raw('Costco declares $1.30 quarterly dividend', 'https://x.com/2026/02/28/costco-dividend'),
+				raw('Costco releases updated proxy for Sept. 22 shareholder meeting', 'https://x.com/2026/01/07/costco-proxy'),
+				raw('Costco Wholesale opens its first warehouse in Sweden', 'https://x.com/2026/03/02/costco-sweden'),
+			],
+			{ company: 'Costco Wholesale', symbol: 'COST', now },
+		);
+		expect(r.dropped.notice).toBe(6);
+		expect(r.items.map((i) => i.title)).toEqual(['Costco Wholesale opens its first warehouse in Sweden']);
+	});
+	test('real stakes and records are news, not notices', () => {
+		const r = rankNews(
+			[
+				raw('Nvidia takes $5 billion stake in Intel', 'https://x.com/2026/03/02/nvidia-intel'),
+				raw('Intel says foundry revenue could hit a record this year', 'https://x.com/2026/03/03/intel-record'),
+				raw('Will Intel stock hit $50? Analysts weigh in', 'https://x.com/2026/03/04/intel-50'),
+			],
+			{ company: 'Intel', symbol: 'INTC', now },
+		);
+		expect(r.items.map((i) => i.title).sort()).toEqual(['Intel says foundry revenue could hit a record this year', 'Nvidia takes $5 billion stake in Intel']);
+		expect(r.dropped.listicle).toBe(1);
+	});
+	test('drops stock-analysis, official-announcements and price-projection pages', () => {
+		const r = rankNews(
+			[
+				raw('Costco Wholesale (Nasdaq:COST) - Stock Analysis - Simply Wall St', 'https://simplywall.st/stocks/us/nasdaq-cost/costco-2026-03'),
+				raw('Costco Wholesale Corporation: Official Announcements - Stock Market News', 'https://in.marketscreener.com/quote/stock/COSTCO-2025-11-23'),
+				raw('Costco Share Price Projections Through Our Proprietary Way.', 'https://npfinancials.com.au/costco'),
+				raw('Costco bulls Ark Invest predicts shares will reach $4,600 by 2026', 'https://x.com/costco-ark'),
+				raw('Costco Stock Price: Latest Market Movement and What Is Driving COST in 2026', 'https://x.com/costco-stock-price'),
+			],
+			{ company: 'Costco Wholesale', symbol: 'COST', now },
+		);
+		expect(r.items).toEqual([]);
+		expect(r.dropped.index).toBe(3);
+		expect(r.dropped.listicle).toBe(2);
+	});
+	test('reportedYear reads the period a title reports on', () => {
+		expect(reportedYear('Lyft Announces Results for First Quarter 2024 - Green Stock News')).toBe(2024);
+		expect(reportedYear('Lyft Announces Fourth Quarter and Full-Year 2023 Results')).toBe(2023);
+		expect(reportedYear('Oracle Q2 FY2026 earnings preview')).toBe(2026);
+		expect(reportedYear('Accenture to Announce Third-Quarter Fiscal 2025 Results')).toBe(2025);
+		expect(reportedYear('Nintendo unveils The Super Mario Galaxy Movie trailer')).toBeNull();
+	});
+	test('a re-published old press release takes the year from its title, so it is stale', () => {
+		const r = rankNews(
+			[
+				raw('Lyft Announces Results for First Quarter 2024 - Green Stock News', 'https://greenstocknews.com/news/nasdaq/lyft/q1', 'Posted March 16, 2026'),
+				raw('Lyft Announces Fourth Quarter and Full-Year 2023 Results', 'https://greenstocknews.com/news/nasdaq/lyft/q4', 'Posted Nov. 5, 2025'),
+				raw('Lyft Stock Drops After Q4 Earnings: AV Deployments in 2026, CEO Says', 'https://www.benzinga.com/markets/earnings/26/02/50528634/lyft-stock-drops'),
+			],
+			{ company: 'Lyft', symbol: 'LYFT', now },
+		);
+		expect(r.items.map((i) => i.title)).toEqual(['Lyft Stock Drops After Q4 Earnings: AV Deployments in 2026, CEO Says']);
+		expect(r.dropped.stale).toBe(2);
+	});
+});
+
+describe('restoreDates', () => {
+	const items = [
+		{ title: 'Lyft Stock Drops After Q4 Earnings: AV Deployments in 2026, CEO Says - Lyft (NASDAQ:LYFT) - Benzinga', date: '2026-02' },
+		{ title: 'Cloudflare Prices $1.125 Billion of 0% Convertible Senior Notes', date: '2026-08-12' },
+		{ title: 'AT&T Announces $250 Billion Commitment to Advance U.S. Connectivity', date: null },
+	];
+	test('keeps numeric dates, restores dropped ones from the matching Ceramic item, converts month names', () => {
+		expect(
+			restoreDates(
+				[
+					'2026-02: Lyft stock drops after Q4 earnings, CEO says AV deployments in 2026',
+					'August 2026: Cloudflare sold $1.125 billion of 0% convertible senior notes',
+					'Lyft stock drops after Q4 earnings as the CEO promises AV deployments in 2026',
+					'Dec 2025: TCS agreed to buy Coastal Cloud for $700 million',
+					'undated: AT&T announces a $250 billion commitment to advance U.S. connectivity',
+					'A sentence that matches nothing',
+					'Tesla 2026: deep tech breakthroughs move the needle',
+				],
+				items,
+			),
+		).toEqual([
+			'2026-02: Lyft stock drops after Q4 earnings, CEO says AV deployments in 2026',
+			'2026-08-12: Cloudflare sold $1.125 billion of 0% convertible senior notes',
+			'2026-02: Lyft stock drops after Q4 earnings as the CEO promises AV deployments in 2026',
+			'2025-12: TCS agreed to buy Coastal Cloud for $700 million',
+			'undated: AT&T announces a $250 billion commitment to advance U.S. connectivity',
+			'undated: A sentence that matches nothing',
+			'undated: Tesla 2026: deep tech breakthroughs move the needle',
+		]);
+	});
+});

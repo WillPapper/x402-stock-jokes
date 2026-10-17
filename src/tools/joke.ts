@@ -6,6 +6,7 @@ import { asJson } from '../lib/json.ts';
 import { factsFor, jokeMessages, type JokeInput } from '../lib/joke-prompt.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 import { logEvent } from '../lib/log.ts';
+import { restoreDates, type NewsItem } from '../lib/news.ts';
 import { persistJoke } from '../lib/persist.ts';
 import { setStep, stepOutput } from '../lib/runs.ts';
 
@@ -88,7 +89,11 @@ export const writeJoke = (conversationId: string) =>
 			// The company and exchange come from the StockTwits step when the orchestrator
 			// leaves them out, so a listed company is never written up as if its IPO were pending.
 			const listing = await stepOutput<{ title?: string | null; exchange?: string | null }>(conversationId, 'stocktwits');
-			const input: JokeInput = { ...data, symbol, company: data.company ?? listing?.title ?? null, exchange: data.exchange ?? listing?.exchange ?? null };
+			// The dates come back from the Ceramic step of this run: the orchestrator drops or
+			// reformats them ("Dec 2025:", "undated:"), and an undated fact reads as today's news.
+			const found = await stepOutput<{ results?: NewsItem[] }>(conversationId, 'ceramic');
+			const news = restoreDates(data.news, found?.results ?? []);
+			const input: JokeInput = { ...data, news, symbol, company: data.company ?? listing?.title ?? null, exchange: data.exchange ?? listing?.exchange ?? null };
 			const facts = factsFor(input);
 			logEvent('tool.start', true, { tool: 'write_joke', input: data, facts }, { conversationId, label: 'write_joke' });
 			await setStep(conversationId, 'write_joke', 'running');
