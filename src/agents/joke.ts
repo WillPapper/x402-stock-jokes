@@ -2,7 +2,7 @@
 import { useAgentFinish, useAgentStart, useModel, useResponseFinish, useResponseStart, useTool } from '@flue/runtime';
 import { X402_PROVIDER_ID } from '../lib/ai-gateway-provider.ts';
 import { archivedPayments, archivedSteps } from '../lib/archive.ts';
-import { accessFor, completeJoke, insertJoke } from '../lib/db.ts';
+import { accessFor, completeJoke, insertJoke, jokeForConversation } from '../lib/db.ts';
 import { handoff } from '../lib/drafts.ts';
 import { config } from '../lib/env.ts';
 import { ledger, totalAuthorizedUsdc } from '../lib/ledger.ts';
@@ -59,14 +59,24 @@ export function Joke({ id }: { id: string }) {
 		const failedTools = response.toolCalls.filter((t) => t.isError).map((t) => t.tool);
 		if (failedTools.length) logEvent('error', false, { where: 'agent-finish', failedTools, toolCalls: response.toolCalls.length }, { conversationId: id, label: 'tool failures' });
 		const draft = handoff.takeDraft(id);
-		if (!draft) {
-			logEvent('agent.done', false, { reason: failedTools.length ? `tool failures: ${failedTools.join(', ')}` : 'finished without a joke' }, { conversationId: id, label: 'agent done' });
-			return;
-		}
 		const payments = await archivedPayments(id, { take: true });
 		const total = totalAuthorizedUsdc(payments);
 		// The hand-off plus whatever the events log has, in case a restart mid-run wiped the hand-off.
 		const steps = await archivedSteps(id, { take: true });
+		if (!draft) {
+			// No draft in memory, but write_joke may still have stored the row before a
+			// Durable Object restart wiped the hand-off (a Disney run finished this way,
+			// 2026-10-17: the row kept 8 of its 10 payments). Finish that row from the
+			// durable events instead of declaring the run joke-less.
+			const stored = await jokeForConversation(id).catch(() => null);
+			if (stored && (await completeJoke(id, { payments, totalAuthorizedUsdc: total, steps }).catch(() => false))) {
+				log.info(`completed joke for ${stored.ticker} after a restart (${payments.length} payments, ${total} USDC authorized)`);
+				logEvent('agent.done', true, { ticker: stored.ticker, payments: payments.length, resumed: true }, { conversationId: id, label: 'agent done' });
+				return;
+			}
+			logEvent('agent.done', false, { reason: failedTools.length ? `tool failures: ${failedTools.join(', ')}` : 'finished without a joke' }, { conversationId: id, label: 'agent done' });
+			return;
+		}
 		try {
 			// write_joke already stored the row; add the closing turn's payments and the full step archive.
 			if (await completeJoke(id, { payments, totalAuthorizedUsdc: total, steps })) {
