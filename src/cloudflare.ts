@@ -38,10 +38,10 @@ export class JokeRunner extends DurableObject {
 		if (this.ctx.id.jurisdiction !== 'us') throw new Error(`JokeRunner must live in the us jurisdiction, got ${this.ctx.id.jurisdiction ?? 'none'}`);
 		await this.ctx.storage.put<Pending>(`pending:${req.id}`, { ...req, queuedAt: Date.now(), attempts: 0 });
 		// Detach from the visitor's request chain: the alarm runs with no visitor
-		// identity. Give the entry request a few seconds to fully finish first, so
-		// the alarm never overlaps an invocation that still carries the visitor.
+		// identity. Fire it immediately; Durable Objects run the alarm only after
+		// this invocation has finished, so it never overlaps the visitor's request.
 		const current = await this.ctx.storage.getAlarm();
-		if (current === null) await this.ctx.storage.setAlarm(Date.now() + 3000);
+		if (current === null) await this.ctx.storage.setAlarm(Date.now());
 		logEvent('gate', true, { probe: 'runner-queued', jurisdiction: this.ctx.id.jurisdiction, by: req.by }, { conversationId: req.id, label: 'runner queued' });
 		return { queued: true, jurisdiction: this.ctx.id.jurisdiction };
 	}

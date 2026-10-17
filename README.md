@@ -31,7 +31,7 @@ A real run (2026-10-16):
   Worker (Hono, src/app.ts)        checks coupon or JWT, records it in D1, answers 202
       │  submit
       ▼
-  JokeRunner (Durable Object, US)  alarm fires 3 s later → dispatch(Joke)
+  JokeRunner (Durable Object, US)  alarm fires at once → dispatch(Joke)
       │
       ▼
   Flue agent Joke (Durable Object, src/agents/joke.ts)
@@ -101,7 +101,7 @@ Verified 2026-10-16: an unpaid POST gets the gateway's 402 with a 0.10 USDC quot
 Monetization Gateway and AI Gateway machine payments are US-only, and they evaluate the country of the **visitor whose request is in flight** when the Worker pays, not the account, the wallet, or the datacenter. Cloudflare carries that identity down the whole request chain, and a Durable Object attributes its outbound calls to whichever incoming request is active. So the path is built to keep every visitor out of the paying code:
 
 1. The entry Worker (any colo, any visitor) only checks the coupon or the gateway's payment and **queues** the message into `JokeRunner`, a Durable Object in the `us` jurisdiction (`src/cloudflare.ts`).
-2. The runner's **alarm**, which has no originating request, dispatches the agent 3 s later. The agent's Durable Object is placed next to the runner (ORD so far) and every paid call leaves from there with no visitor attached.
+2. The runner's **alarm**, which has no originating request, dispatches the agent as soon as the submit call has returned. The agent's Durable Object is placed next to the runner (ORD so far) and every paid call leaves from there with no visitor attached.
 3. **Nothing reads the agent's object.** Tools and the agent log progress to D1 (`events`), the finished joke goes to D1 (`jokes`), and `GET /joke/<id>` is served from D1. Conversation reads (`GET /agents/joke/<id>`, streams) answer 403 to everyone; abort needs the coupon header.
 
 Verified with a Canadian VPN: submit, poll every 2 s, full run, all payments 200. The `gate` events record visitor country, runner and agent colo for every run. Full write-up and bug report: [docs/ai-gateway-visitor-country.md](./docs/ai-gateway-visitor-country.md).
