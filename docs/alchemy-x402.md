@@ -12,7 +12,7 @@
 - **Overage on the existing account comes only from upgrading to Pay-As-You-Go.** That plan charges a card automatically and removes the free 30M CU a month ([PAYG article](https://support.alchemy.com/articles/2300474614-understanding-alchemy-s-pay-as-you-go-billing-model)).
 - **A practical "overage via x402":** keep the free key as the main path. When the key hits its limit, fall back to the gateway, paying from the app wallet's credits. The price per CU matches PAYG, and the key keeps its free 30M CU. **This app now does this** (see "The fallback in this app" below).
 - **Live tests (2026-10-17), both modes:**
-    - **Credits:** the gateway took $1 and did not credit it. The top-up settled on-chain, but the paid request answered `500`, and the gateway kept quoting a new $1 for the same wallet.
+    - **Credits:** the gateway took two $1 top-ups (05:29 and 06:15 UTC) and credited neither. Both settled on-chain; the paid requests answered `500` and `402`. Since then, JSON-RPC asks for another $1, and REST routes answer `429 Monthly capacity limit exceeded`.
     - **Pay-per-request ($0.001):** works for `alchemy_getAssetTransfers`, the call the fallback makes (`200`, 475 transfers).
     - **Standard `eth_*` calls** (`eth_blockNumber`, `eth_call`) answered `500 Internal error` after payment in both modes.
     - Report for Alchemy: [alchemy-gateway-topup-not-credited.md](alchemy-gateway-topup-not-credited.md).
@@ -99,7 +99,7 @@ Implemented 2026-10-17 in `src/lib/alchemy.ts`, used by `src/lib/transfers.ts`.
 ## Open questions for Alchemy
 
 - Can x402 credits be linked to an existing dashboard team and its API key, or are they always a separate "agentic account"?
-- Why was our settled $1 top-up (tx `0xaac905…35f4`) never credited? See [the report](alchemy-gateway-topup-not-credited.md).
+- Why were our two settled $1 top-ups (txs `0xaac905…35f4` and `0x4dd7859f…3078`) never credited? See [the report](alchemy-gateway-topup-not-credited.md).
 - Do credits stay with the wallet across SIWE tokens (each expires after 1 h by default)? Do they expire? Our live test couldn't tell, because the gateway never credited the top-up.
 - Alchemy's [error reference](https://www.alchemy.com/docs/reference/error-reference) gives `403` "Monthly capacity limit exceeded." for the monthly limit. Does that last until the next billing month?
 - Which EVM payee is current: `0x0573c4dA…08B2` (live) or `0x658dc531…81e5` (skill reference)?
