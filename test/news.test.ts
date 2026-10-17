@@ -117,6 +117,19 @@ describe('rankNews recency gate', () => {
 		expect(r.dropped.undated).toBe(0);
 		expect(r.newest).toBeNull();
 	});
+	test('round-ups that mention the company only deep in the snippet, and investor guides, are dropped', () => {
+		const filler = 'Bitcoin fell below $100,000 as altcoins slid. '.repeat(6);
+		const raw = [
+			{ title: 'Daily News | BTC Experiences Short-term Sell-off', url: 'https://gate.com/2026/04/21/daily', description: `${filler} Meanwhile SpaceX filed its S-1.` },
+			{ title: 'SpaceX IPO: The Ultimate Investors Guide to the Stars', url: 'https://ai-stocks.com/2025/09/28/spacex-ipo-guide/', description: 'SpaceX' },
+			{ title: 'SpaceX IPO 2026 Explained: How Indians Can Apply and Invest', url: 'https://newsx.com/spacex-ipo-2026-explained', description: 'SpaceX' },
+			{ title: 'Bloomberg analyst: Musk may use SPCX as the SpaceX ticker', url: 'https://x.test/2026/04/08/spcx', description: 'SpaceX IPO ticker' },
+		];
+		const r = rankNews(raw, { company: 'SpaceX', symbol: 'SPCX', now, limit: 6 });
+		expect(r.items.map((i) => i.title)).toEqual(['Bloomberg analyst: Musk may use SPCX as the SpaceX ticker']);
+		expect(r.dropped['off-topic']).toBe(1);
+		expect(r.dropped.listicle).toBe(2);
+	});
 	test('an item far older than the newest is dropped as old', () => {
 		const raw = [
 			{ title: 'Acme announces layoffs', url: 'https://x.test/2026/09/01/acme-layoffs', description: 'Acme' },

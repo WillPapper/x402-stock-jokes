@@ -12,7 +12,7 @@ export const SYSTEM = [
 	'The joke must be about something in the news items. Use the price only if it makes the punchline land, and never use more than one number in total.',
 	'Never recite statistics: no sentiment counts, bullish or bearish tallies, watchlist sizes, percentages or volume changes.',
 	'A trader quote may appear only if it is funnier than the news; paraphrase it in at most eight quoted words.',
-	'Each news item starts with its date and you are told today\'s date. An item older than a month is a past event: joke about what happened then, never say or imply it is pending, upcoming, happening now or "just" happened, and do not guess what came after it.',
+	'Each news item starts with its date and how long ago that was. Anything older than a month is history: write it in the past tense ("back in April, an analyst said…"), never as pending, upcoming, happening now or "just" happened, and do not guess what came after it.',
 	'No financial advice, no slurs, nothing about anyone\'s appearance; do not invent events, products, names or numbers beyond what you were given.',
 	'Return only the joke text, no preamble, no quotation marks around it.',
 ].join(' ');
@@ -40,10 +40,23 @@ export function factsFor(input: JokeInput): string[] {
 
 export function userPrompt(input: JokeInput): string {
 	const lines = [`Ticker: ${input.symbol}${input.company ? ` (${input.company})` : ''}`, `Today: ${input.today ?? new Date().toISOString().slice(0, 10)}`];
-	lines.push('', 'NEWS (the premise; pick the funniest angle):', ...(input.news.length ? input.news.map((f) => `- ${f}`) : ['- (none found)']));
+	const today = input.today ?? new Date().toISOString().slice(0, 10);
+	lines.push('', 'NEWS (the premise; pick the funniest angle):', ...(input.news.length ? input.news.map((f) => `- ${withAge(f, today)}`) : ['- (none found)']));
 	if (input.chatter?.length) lines.push('', 'Trader chatter (optional colour, only if funnier than the news):', ...input.chatter.map((q) => `- "${q.replace(/^"|"$/g, '')}"`));
 	if (input.price) lines.push('', `Price: $${String(input.price).replace(/^\$/, '')} (optional, use only if the punchline needs it)`);
 	return lines.join('\n');
+}
+
+/** "2026-04-08: Musk may use SPCX" → "2026-04-08 (6 months ago): Musk may use SPCX", so the model cannot miss how old an item is. */
+export function withAge(fact: string, today: string): string {
+	const m = fact.match(/^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?(\s*:)/);
+	if (!m) return fact;
+	const [y, mo, d] = [Number(m[1]), m[2] ? Number(m[2]) : 7, m[3] ? Number(m[3]) : 15];
+	const days = Math.round((Date.parse(today) - Date.UTC(y, mo - 1, d)) / 86_400_000);
+	if (Number.isNaN(days) || days < 0) return fact;
+	const ago = days <= 7 ? 'this week' : days <= 45 ? `${days} days ago` : days < 365 ? `${Math.round(days / 30)} months ago` : `${(days / 365).toFixed(1)} years ago`;
+	const stamp = fact.slice(0, m[0].length - m[4]!.length);
+	return `${stamp} (${ago})${fact.slice(stamp.length)}`;
 }
 
 /** OpenAI-style chat messages for the AI Gateway /ai/run call. */

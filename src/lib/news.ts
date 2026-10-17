@@ -57,6 +57,7 @@ const LISTICLE = [
 	/\b(\d+|two|three|four|five|six|seven|eight|nine|ten)\s+(reasons?|stocks?|things|ways|picks|top|best|charts?|numbers)\b/i,
 	/\b(top|best)\b.{0,30}\b(stocks?|picks|etfs?|investments?)\b/i,
 	/\bhow to (buy|invest|trade)\b/i,
+	/\b(ultimate|complete|beginner'?s?|investor'?s?|investors) guide\b|\bguide to\b|\bexplained\b|\bprepare to invest\b|\bhow .{0,30}\b(can|to) (apply|invest)\b/i,
 	/\bwhat investors need to know\b|\bneed to know\b.{0,20}\binvestors\b/i,
 	/\b(should you|is it time to|time to|when to)\s+(buy|sell)\b/i,
 	/\bis\b.{0,50}\b(a buy|a sell|a good (buy|investment)|worth buying|the best)/i,
@@ -235,8 +236,11 @@ export function rankNews(raw: RawNews[], opts: { company: string; symbol: string
 			dropped.junk++;
 			continue;
 		}
-		const haystack = `${title} ${desc}`.toLowerCase();
-		if (!haystack.includes(company) && !haystack.includes(companyFirst) && !symbolRe.test(`${title} ${desc}`)) {
+		// The company must be the subject: in the title, or in the opening of the
+		// snippet. Crypto and market round-ups mention everyone once, deep in the text.
+		const lead = `${title} ${desc.slice(0, 200)}`;
+		const leadLower = lead.toLowerCase();
+		if (!leadLower.includes(company) && !leadLower.includes(companyFirst) && !symbolRe.test(lead)) {
 			dropped['off-topic']++;
 			continue;
 		}
