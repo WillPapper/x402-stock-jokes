@@ -195,6 +195,20 @@ describe('notices and re-published press releases', () => {
 		expect(r.dropped.index).toBe(3);
 		expect(r.dropped.listicle).toBe(2);
 	});
+	test('drops court dockets, insider and congressional trade pages', () => {
+		const r = rankNews(
+			[
+				raw('Kampa, et al v. Costco Wholesale :: Virginia Eastern District Court :: Federal Civil Lawsuit', 'https://www.plainsite.org/dockets/1'),
+				raw('Costco Wholesale (COST) Government Trades - Latest Congressional Stock Transactions', 'https://www.benzinga.com/quote/COST/government-trades'),
+				raw('Latest Insider News for Costco Wholesale Corporation (COST) - Nasdaq Stock Exchange', 'https://in.marketscreener.com/quote/stock/COSTCO/insider'),
+				raw('Lyft - LYFT - Stock Price & News | The Motley Fool', 'https://www.fool.com/quote/nasdaq/lyft/2026/03/23/'),
+				raw('Costco Wholesale Partnerships', 'https://partnerships.utah.edu/costco'),
+				raw('Costco Wholesale sued by shoppers over membership price rise', 'https://x.com/2026/03/02/costco-sued'),
+			],
+			{ company: 'Costco Wholesale', symbol: 'COST', now },
+		);
+		expect(r.items.map((i) => i.title)).toEqual(['Costco Wholesale sued by shoppers over membership price rise']);
+	});
 	test('reportedYear reads the period a title reports on', () => {
 		expect(reportedYear('Lyft Announces Results for First Quarter 2024 - Green Stock News')).toBe(2024);
 		expect(reportedYear('Lyft Announces Fourth Quarter and Full-Year 2023 Results')).toBe(2023);

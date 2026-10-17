@@ -101,6 +101,7 @@ const INDEX_PAGE = [
 	/\b(news|headlines|updates) - [\w .&'’]+$/i,
 	/\bstock analysis\b|\bofficial announcements\b|\bour latest articles\b|\bcomprehensive analysis\b|\blatest market movement\b|\bmarket performance and\b|\bfuture prospects\b/i,
 	/\b(stock|share) price:/i,
+	/\b(stock price|quote) (&|and) news\b|\b(government|congressional|insider|politician) (trades?|trading|transactions|buying|selling|news)\b|\blatest insider\b|\bcourt (docket|records?)\b|\bdistrict court\b|\b(federal|civil) (lawsuit|litigation)\b.{0,20}::|\bpartnerships?$/i,
 ];
 /**
  * Routine notices and paid placements that read like news but never make a
@@ -118,7 +119,7 @@ const NOTICE = [
 	/\bproxy( statement)?\b|\b(shareholders?'?|stockholders?'?) meeting\b/i,
 	/\bto (participate|present|speak) (in|at)\b.{0,50}\b(conference|summit|forum)\b/i,
 ];
-const JUNK_HOSTS = /(^|\.)(urlscan\.io|wikipedia\.org|defenseworld\.net|marketbeat\.com|simply-invest\.info|spreaker\.com|feedburner\.com)$/i;
+const JUNK_HOSTS = /(^|\.)(urlscan\.io|wikipedia\.org|defenseworld\.net|marketbeat\.com|simply-invest\.info|spreaker\.com|feedburner\.com|plainsite\.org|courtlistener\.com|justia\.com|pacermonitor\.com|law360\.com|sec\.gov)$/i;
 const INDEX_PATH = /\/(quote|quotes|symbol|symbols|stocks?|company|companies|news|forecasts?)\/[A-Za-z0-9.\-]+\/?$|\/(news|blog|feed)\/?$/i;
 
 export function hostOf(url: string): string {
