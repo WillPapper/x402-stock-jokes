@@ -23,12 +23,15 @@ The index trails the news by about six months whatever the query. Price: 0.001 U
 
 One paid probe, `{ query: 'Tesla stock news', type: 'fast', numResults: 10, category: 'news', startPublishedDate: <30 days ago> }`: ten results, all published 2026-10-15 or 2026-10-16 (Reuters via Investing.com, Forbes, CNBC, Motley Fool, Yahoo Finance), each with a `publishedDate`. The date filter and news category work over x402; `numResults` is clamped to 10. Quote accepted on Base, Solana, World Chain and Arc. Same list price as the API-key path ($0.007 per fast search); the response reports `costDollars`.
 
+## Parallel (parallelmpp.dev/api/search, Parallel's own x402/MPP gateway, 0.01 USDC per search)
+
+One paid probe, `fast` mode, two keyword queries plus an objective, `advanced_settings.source_policy.after_date` set to 30 days ago, `max_results: 10`: ten results. Four were dated October 2026 news (CNBC Q3 deliveries 2026-10-02, Bloomberg 2026-10-12, two Investing.com "Tesla News Today" pages 2026-10-14/15), one was Tesla's own Q3 2026 deliveries release (undated), and five were undated quote or index pages (Markets Insider, Morningstar, Benzinga, Tracxn). The `after_date` filter did not keep undated pages out, and `publish_date` is only present on about half the results. Fresh, but noisier than Exa for this job and 10x Ceramic's price per query; `advanced` mode (about 3 s) was not tried.
+
 ## Others
 
-- Parallel: accepts x402; not probed.
 - Brave, Tavily, Firecrawl, Linkup: no x402 endpoint found.
 - Cloudflare AI Gateway's "web search" is a tool inside model calls (Anthropic, OpenAI, xAI, Qwen, Perplexity, Parallel), billed through Unified Billing; Machine Payments covers `/ai/run` only, so it is not a drop-in for step 2.
 
 ## Implication for the demo
 
-Per joke today: three Ceramic queries, 0.003 USDC, newest item months old, heavy local filtering. One Exa `fast` query with `category: 'news'` and a 30-day `startPublishedDate` would cost 0.007 USDC and return dated, current news with no ranking work. Not changed: the app stays on Ceramic by decision; this note records the measurement.
+Per joke today: three Ceramic queries, 0.003 USDC, newest item months old, heavy local filtering. One Exa `fast` query with `category: 'news'` and a 30-day `startPublishedDate` would cost 0.007 USDC and return dated, current news with no ranking work. Parallel at 0.01 USDC is as fresh but returns quote pages alongside the news, so the ranking code would still be needed. Not changed: the app stays on Ceramic by decision; this note records the measurement.
