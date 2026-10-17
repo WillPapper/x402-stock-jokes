@@ -32,6 +32,52 @@ All to `0x0573c4dA7fC31E944e5FF959fEf3b42199C308B2`, the `payTo` of the gateway'
 
 Both credit quotes read: `exact`, `eip155:8453`, amount `1000000`, asset USDC `0x8335…2913`, `extra.name` "USD Coin". Description: "Purchase $1 of Alchemy API credits — includes 2,222,222 Compute Units (~100,000 requests) at $0.45 per million CUs."
 
+## Identifiers for your logs
+
+**Payments.** Each is a USDC `transferWithAuthorization` (EIP-3009) on `0x8335…2913`, signed by our wallet and submitted by your facilitator. The authorization nonce is the `AuthorizationUsed` nonce, which should match your settlement records. Each authorization's `validBefore` is its signing time plus the quote's `maxTimeoutSeconds` (300); `validAfter` is 0.
+
+| Payment | Signed (validBefore − 300 s) | Settled (block time) | Block / tx index / `Transfer` log index | Facilitator submitter | Authorization nonce |
+|---|---|---|---|---|---|
+| $1 credits #1 | 05:29:09 | 05:29:13 | 52712803 / 17 / 252 | `0x59b7ebc67a3d627fabaf06768c818638452ae704` | `0x243bafc8fa06d18f9927845ab5c5cfa7d5b52abb6f00e24c26161fa33b72983a` |
+| $0.001 `eth_blockNumber` | 05:37:23 | 05:37:25 | 52713049 / 93 / 322 | `0x772003a2e9c2ccc8af956870a37a66f64f8cec38` | `0x7e04d2195e67850ab2c843199c07527458f3e7a83c1b3b2fe259029eb81133ec` |
+| $0.001 `alchemy_getAssetTransfers` | 05:37:24 | 05:37:27 | 52713050 / 37 / 191 | `0xe74817f4cdc15844314812b2271276e64e890fae` | `0x2b98f14ecda9a2c8ec8b604613e692289e441b43dc00f0740236b1bd4afa3d45` |
+| $0.001 `eth_call` | 05:37:26 | 05:37:29 | 52713051 / 30 / 120 | `0xa32ccda98ba7529705a059bd2d213da8de10d101` | `0x6e3f6eaaca868315f3aafbd9c1205827a5aeaaf7ef4b65eb0d1adaaf2bef9945` |
+| $1 credits #2 | 06:15:12 | 06:15:15 | 52714184 / 81 / 232 | `0xca5e87f82b3fa093800e6ad67d621a427d79c70d` | `0x886084d3b593eb3c4e34b606ed05a9f4cb8462994dadda216c621d1c06bc34fe` |
+
+The quote both $1 payments answered, decoded from `PAYMENT-REQUIRED` (it is unchanged as of 06:23:30):
+
+```json
+{"scheme":"exact","network":"eip155:8453","amount":"1000000","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","payTo":"0x0573c4dA7fC31E944e5FF959fEf3b42199C308B2","maxTimeoutSeconds":300,"extra":{"name":"USD Coin","version":"2"}}
+```
+
+**Trace IDs.** Only the REST routes return `x-alchemy-trace-id` (and `cf-ray`). Every one below is our wallet, signed in, unpaid, answered `429` "Monthly capacity limit exceeded. Visit https://dashboard.alchemy.com/settings/billing to upgrade your scaling policy for continued service."
+
+| Time (UTC) | Route | `x-alchemy-trace-id` | `cf-ray` |
+|---|---|---|---|
+| ~06:03 | `/prices/v1/tokens/by-symbol` | `b8eeaa5e-afe3-47b4-8b0b-5ad422b162b8` | |
+| ~06:03 | `/data/v1/assets/tokens/by-address` | `d868e245-d2df-42d8-af22-40583ea4c5d0` | |
+| 06:15:17 | `/prices/v1/tokens/by-symbol` | `7e2d2b76-2f5d-4bbf-83db-3ac0948299d2` | |
+| 06:15:17 | `/data/v1/assets/tokens/by-address` | `51d99da0-1f7c-4921-a5cb-54e5be324855` | |
+| 06:15:18 | `/prices/v1/tokens/by-symbol` | `ff70582b-e3d3-4f3c-b142-a05f32bcf33d` | |
+| 06:15:18 | `/data/v1/assets/tokens/by-address` | `39b5418a-a465-485b-87aa-1ad1ce52bb0a` | |
+| 06:16:19 | `/prices/v1/tokens/by-symbol` | `a19fb426-8dd2-4dbb-99f2-658b3b2c5edc` | |
+| 06:16:19 | `/data/v1/assets/tokens/by-address` | `b87aee75-b824-482e-a441-0d906e2f30ba` | |
+| 06:18:20 | `/prices/v1/tokens/by-symbol` | `d7c7cb23-90be-41b2-b2fb-1520d6c1cd6e` | |
+| 06:18:20 | `/data/v1/assets/tokens/by-address` | `bcfe8349-020c-45ba-9192-7bd0ea500437` | |
+| 06:23:30 | `/prices/v1/tokens/by-symbol` | `a1e6b167-9c80-4476-99f7-3af65f751c9f` | `a4bd370a3fb17603-SEA` |
+| 06:23:31 | `/data/v1/assets/tokens/by-address` | `a0ae11e0-5a07-4b46-bb5a-ca0501ce8e9f` | `a4bd370af87d7537-SEA` |
+| 06:23:31 | `/base-mainnet/nft/v3/getNFTsForOwner` | `b8cf15c6-fef9-43cf-8774-0e9069fe2fdd` | |
+
+**JSON-RPC responses** (`/base-mainnet/v2`) carry no trace or request ID: only `date`, `server: istio-envoy` and `x-envoy-upstream-service-time`. The paid request at 06:15:12–06:15:17 took `x-envoy-upstream-service-time: 5034`. All JSON-RPC times above are to the second.
+
+**Client.** All requests came from one machine, routed through Cloudflare's SEA colo (per `cf-ray`), using Bun 1.3.14 `fetch` (default user agent).
+- **Payments:** made with `@x402/fetch` / `@x402/evm` 2.28 (`ExactEvmScheme`, the same scheme `@alchemy/x402` uses).
+- **Sign-in tokens:** SIWE messages from viem's `createSiweMessage`, in the same fields and order as `@alchemy/x402`'s `signSiwe`. The tokens were base64; `signSiwe` uses base64url. The gateway accepted ours.
+
+**History before the first payment.** About 00:25 UTC on 2026-10-17 the wallet first signed in, unpaid, and got the $1 quote. In the same test we sent our separate Alchemy dashboard app's API key, with and without SIWE: in the URL path (`/base-mainnet/v2/<key>`) and as a `Bearer` token. The gateway ignored it: `402` with the path key, `401 INVALID_AUTH_FORMAT` with `Bearer`. We mention it in case it linked the wallet to that free-plan app; that app's own key still works.
+
+**Not recorded.** The SIWE tokens and nonces used for the two paid requests. The body of the `402` that answered the second paid request, which may carry `extensions.paymentError`.
+
 ## How to reproduce
 
 These use Alchemy's own `@alchemy/x402` CLI (0.6.6) and curl. `wallet-key.txt` holds a wallet's private key. The `Authorization` header is the same for every request.
