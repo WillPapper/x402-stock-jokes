@@ -1,0 +1,29 @@
+---
+/** The counters and the jokes-per-hour sparkline; filled by scripts/stats.ts. */
+---
+
+<div class="stats">
+	<div class="stat"><b id="s-count">–</b><span>jokes so far</span><small id="s-count-detail"></small></div>
+	<div class="stat wide"><b id="s-paid">–</b><span>USDC paid on-chain</span><small id="s-paid-detail"></small></div>
+	<div class="stat"><b id="s-earned">–</b><span>USDC earned from x402 jokes</span><small id="s-earned-detail"></small></div>
+</div>
+<div class="card">
+	<div class="sparkwrap"><div class="step-detail">Jokes per hour, last 24h</div><div class="step-detail" id="sparkpeak"></div></div>
+	<svg class="spark" id="spark" viewBox="0 0 240 48" preserveAspectRatio="none" aria-label="jokes per hour" role="img"></svg>
+	<div class="axis"><span>24h ago</span><span>now</span></div>
+</div>
+
+<style>
+	.stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px }
+	@media (max-width:560px) {
+		.stats { grid-template-columns:1fr 1fr }
+		.stats .stat.wide { grid-column:1 / -1; order:3 }
+	}
+	.stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; min-width:0 }
+	.stat b { display:block; font-size:22px }
+	.stat span { color:var(--muted); font-size:13px; display:block }
+	.stat small { color:var(--muted); font-size:12px; display:block; margin-top:4px; font-family:var(--mono); word-break:break-word }
+	.sparkwrap { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap }
+	.spark { width:100%; height:48px; display:block; margin-top:6px }
+	.axis { display:flex; justify-content:space-between; color:var(--muted); font-size:11px; font-family:var(--mono); margin-top:2px }
+</style>

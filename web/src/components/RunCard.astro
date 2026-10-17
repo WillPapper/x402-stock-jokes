@@ -1,0 +1,50 @@
+---
+/** The current run: one row per paid step plus the agent's own turns, collapsing to a summary line when done. */
+---
+
+<div id="live" class="sr-only" aria-live="polite"></div>
+<section class="card hidden" id="run">
+	<div class="bar hidden" id="bar" aria-hidden="true"></div>
+	<div class="run-summary"><span id="summary-text"></span><button type="button" class="linkbtn" id="summary-toggle" aria-expanded="false" aria-controls="steps">Show details</button></div>
+	<ol class="steps" id="steps">
+		<li><span class="dot" data-step="started"></span><div><div class="step-title">Agent started</div><div class="step-detail">Waiting for a ticker.</div></div><div class="receipt"></div></li>
+		<li><span class="dot" data-step="fetch_stocktwits_signals"></span><div><button type="button" class="steptitle" aria-expanded="false">1. StockTwits chatter (x402)</button><div class="step-detail"></div></div><div class="receipt"></div></li>
+		<li><span class="dot" data-step="search_stock_news"></span><div><button type="button" class="steptitle" aria-expanded="false">2. Ceramic news search (x402)</button><div class="step-detail"></div></div><div class="receipt"></div></li>
+		<li><span class="dot" data-step="write_joke"></span><div><button type="button" class="steptitle" aria-expanded="false">3. Joke from AI Gateway (x402)</button><div class="step-detail"></div></div><div class="receipt"></div></li>
+		<li><span class="dot" data-step="finished"></span><div><button type="button" class="steptitle" aria-expanded="false">Agent turns</button><div class="step-detail">Each model turn is its own x402 payment to AI Gateway.</div></div><div class="receipt"></div></li>
+	</ol>
+	<p class="runnote hidden" id="runnote" aria-live="polite"></p>
+</section>
+
+<style>
+	.bar { position:absolute; left:14px; right:14px; top:0; height:3px; border-radius:0 0 3px 3px; overflow:hidden; background:var(--line) }
+	.bar::after { content:""; position:absolute; left:-40%; width:40%; height:100%; background:var(--accent); animation:slide 1.4s ease-in-out infinite }
+	@keyframes slide { to { left:100% } }
+	@media (prefers-reduced-motion: reduce) { .bar::after, .dot.running { animation:none } }
+	.run-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:14px }
+	.run-summary .linkbtn { font-size:14px }
+	#run.collapsed .steps { display:none }
+	#run:not(.done) .run-summary { display:none }
+	#run.done:not(.collapsed) .run-summary { margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed var(--line) }
+	.steps { list-style:none; padding:0; margin:0; display:grid; gap:12px }
+	.steps > li { display:grid; grid-template-columns:26px 1fr auto; gap:10px; align-items:start }
+	/* An open panel (built by hood.ts) spans the row. */
+	.steps :global(.hood) { grid-column:1 / -1 }
+	.dot { width:22px; height:22px; border-radius:50%; border:2px solid var(--line); display:grid; place-items:center; font-size:12px; margin-top:2px; color:var(--muted) }
+	.dot.running { border-color:var(--warn); animation:pulse 1s infinite }
+	.dot.done { border-color:var(--ok); background:var(--ok); color:#fff }
+	.dot.error { border-color:var(--err); background:var(--err); color:#fff }
+	.dot.skipped { border-style:dashed }
+	.dot.info { border-color:var(--accent); color:var(--accent); font-weight:700 }
+	@keyframes pulse { 50% { opacity:.4 } }
+	.steptitle { background:none; border:0; padding:0; margin:0; font:inherit; font-weight:600; color:inherit; cursor:pointer; text-align:left; border-radius:4px }
+	.steptitle.clickable::after { content:" ▾"; color:var(--muted); font-size:12px }
+	.steptitle[aria-expanded="true"].clickable::after { content:" ▴" }
+	.receipt { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end }
+	.runnote { margin:12px 0 0; padding-top:10px; border-top:1px dashed var(--line); color:var(--muted); font-size:14px }
+	.runnote.err { color:var(--err) }
+</style>
+
+<script>
+	import '../scripts/run.ts';
+</script>

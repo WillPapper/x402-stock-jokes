@@ -1,0 +1,86 @@
+/*
+ * Shared, unscoped styles: the design tokens, element defaults, and every class
+ * that the client scripts put on markup they build at runtime (joke cards,
+ * receipt chips, under-the-hood panels). Astro's scoped styles cannot reach
+ * runtime markup, so those classes live here. Layout that belongs to one
+ * component stays in that component's <style>.
+ *
+ * The permalink page (src/routes/permalink.ts) inlines this file too, so the
+ * two pages share one set of tokens and chip styles.
+ */
+:root { --bg:#f6f4ee; --fg:#1d1c1a; --muted:#6b675f; --card:#ffffff; --line:#e4e0d6; --accent:#0d6b5e; --accent-hover:#0a5a4f; --accent-fg:#ffffff; --ok:#1a7f4b; --warn:#a15c00; --err:#b3261e; --chip:#eef4f2; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-hover:#7ee0cf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; --chip:#242a28; } }
+:root[data-theme="dark"] { --bg:#141413; --fg:#ecebe7; --muted:#9b978f; --card:#1e1e1c; --line:#2d2d2a; --accent:#5fd3bf; --accent-hover:#7ee0cf; --accent-fg:#0d1f1b; --ok:#5fd38f; --warn:#f0b35c; --err:#ff8a80; --chip:#242a28; }
+* { box-sizing:border-box }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+main { max-width:760px; margin:0 auto; padding:36px 16px 64px; }
+h1 { font-size:28px; margin:0 0 4px; letter-spacing:-0.01em }
+h2 { font-size:17px; margin:28px 0 10px; display:flex; align-items:baseline; gap:10px }
+h2 small { font-weight:400; color:var(--muted); font-size:13px }
+a { color:var(--accent); text-underline-offset:2px }
+.sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap }
+.hidden { display:none !important }
+.muted { color:var(--muted) }
+.err { color:var(--err); white-space:pre-wrap }
+code, pre { font-family:var(--mono); font-size:13px }
+pre { background:var(--chip); padding:12px; border-radius:10px; overflow:auto; margin:10px 0 0; white-space:pre-wrap; word-break:break-word }
+details summary { cursor:pointer; margin-top:10px }
+
+/* ---- buttons ---- */
+button { font:inherit; font-weight:600; padding:12px 18px; border:0; border-radius:10px; background:var(--accent); color:var(--accent-fg); cursor:pointer; transition:background .12s, transform .06s }
+button:hover:not(:disabled) { background:var(--accent-hover) }
+button:active:not(:disabled) { transform:translateY(1px) }
+button:disabled { opacity:.55; cursor:default }
+button:focus-visible, .badge:focus-visible, .linkbtn:focus-visible { outline:2px solid var(--accent); outline-offset:2px }
+.secondary { background:var(--chip); color:var(--fg); font-weight:500 }
+.secondary:hover:not(:disabled) { background:var(--line) }
+.linkbtn { background:none; border:0; padding:0; color:var(--accent); text-decoration:underline; text-underline-offset:2px; cursor:pointer; font:inherit; font-size:inherit; font-weight:500 }
+.linkbtn:hover { color:var(--accent-hover) }
+
+/* ---- cards (the result card is static, feed cards are built by feed.ts) ---- */
+.card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin-bottom:14px; min-width:0; position:relative }
+.card.new { animation:pop .6s ease-out }
+@keyframes pop { from { transform:translateY(-6px); box-shadow:0 0 0 3px var(--accent) } to { transform:none } }
+@media (prefers-reduced-motion: reduce) { .card.new { animation:none } }
+.meta { display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:13px; margin-bottom:6px; flex-wrap:wrap }
+.meta .plink { color:inherit; text-decoration:none }
+.meta .plink:hover, .meta .plink:focus-visible { color:var(--accent); text-decoration:underline }
+.ticker { font-weight:700; color:var(--fg) }
+.joke { font-size:22px; line-height:1.35; margin:0 0 12px; white-space:pre-wrap }
+.based { color:var(--muted); font-size:15px; margin:0 }
+.step-title { font-weight:600 }
+.step-detail { color:var(--muted); font-size:14px; word-break:break-word }
+
+/* ---- receipt chips (receipts.ts) ---- */
+.receipts { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; align-items:center }
+.chip { display:inline-flex; align-items:center; min-height:30px; font:13px/1 var(--mono); padding:0 10px; border-radius:999px; background:var(--chip); color:var(--fg); white-space:nowrap; gap:6px }
+.chip a { color:var(--accent); text-decoration:none }
+.chip a:hover { text-decoration:underline }
+.chip.x402 { background:var(--accent); color:var(--accent-fg); font-weight:600 }
+.chip.x402 a { color:inherit; border-left:1px solid color-mix(in srgb, var(--accent-fg) 40%, transparent); padding-left:8px; margin-left:2px }
+.chipgroup { display:inline-flex; align-items:stretch; border-radius:999px; background:var(--chip); overflow:hidden; min-height:30px }
+.chipgroup .badge { border-radius:0; min-height:30px; padding:0 10px }
+.chipgroup a, .chipgroup .amt { display:inline-flex; align-items:center; padding:0 10px 0 8px; border-left:1px solid var(--card); color:var(--accent); font:13px/1 var(--mono); text-decoration:none; white-space:nowrap }
+.chipgroup .amt { color:var(--muted) }
+.chipgroup a:hover { background:var(--line) }
+.chipgroup .badge:hover, .chipgroup .badge[aria-expanded="true"] { background:var(--line); border-color:transparent }
+.badge { cursor:pointer; border:1px solid transparent; font:13px/1 var(--mono); min-height:30px; padding:0 10px; border-radius:999px; background:var(--chip); color:var(--fg); font-weight:500; white-space:nowrap }
+.badge::after { content:" ▾"; color:var(--muted) }
+.badge[aria-expanded="true"]::after { content:" ▴" }
+.badge:hover { border-color:var(--accent); background:var(--chip) }
+.badge[aria-expanded="true"] { border-color:var(--accent) }
+
+/* ---- under the hood panels (hood.ts) ---- */
+.hood { margin-top:10px; border-top:1px dashed var(--line); padding-top:10px; position:relative }
+.hood-body h4 { margin:0 28px 4px 0; font-size:14px }
+.hood p { margin:0 0 8px; font-size:14px; color:var(--muted) }
+.hood .close { position:absolute; right:0; top:8px; background:none; border:0; color:var(--muted); font-size:18px; line-height:1; padding:4px 8px; cursor:pointer; border-radius:6px }
+.hood .close:hover { color:var(--fg); background:var(--chip) }
+.hood dl { display:grid; grid-template-columns:max-content 1fr; gap:4px 12px; margin:0 0 8px; font-size:14px }
+.hood dt { color:var(--muted) } .hood dd { margin:0; word-break:break-word }
+.hood ul { margin:0 0 8px; padding-left:18px; font-size:14px }
+.hood li { margin:2px 0 }
+.hood blockquote { margin:0 0 8px; padding:8px 12px; border-left:3px solid var(--accent); background:var(--chip); border-radius:0 8px 8px 0; font-size:14px; white-space:pre-wrap }
+.hood details summary { font-size:13px; color:var(--muted); margin-top:4px }
+.hood pre { max-height:340px; overflow:auto; margin:6px 0 0; font-size:12px }
+.hood .links { font-size:13px; margin-top:8px }

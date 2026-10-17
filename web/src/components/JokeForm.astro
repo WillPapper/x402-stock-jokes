@@ -1,0 +1,138 @@
+---
+/** The ticker and coupon form: validation hints, the recent-joke pause, and the coupon Show/Hide toggle. */
+---
+
+<form id="form">
+	<input id="ticker" placeholder="Ticker, e.g. NVDA" maxlength="13" autocomplete="off" required aria-label="Ticker" aria-describedby="tickerhint" list="tickers" />
+	<datalist id="tickers"></datalist>
+	<div class="field">
+		<input id="password" type="text" class="masked" placeholder="Coupon code (optional)" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Coupon code" aria-describedby="pwhint" />
+		<button type="button" class="reveal" id="reveal" aria-label="Show coupon code" aria-pressed="false">Show</button>
+	</div>
+	<button id="go" type="submit">Tell me a joke</button>
+	<p class="hint err hidden" id="tickerhint" aria-live="polite"></p>
+	<p class="hint warn hidden" id="recent" aria-live="polite"><span id="recent-text"></span> <button type="button" class="linkbtn" id="recent-show">Show it</button> · <button type="button" class="linkbtn" id="recent-run">Run anyway</button></p>
+	<p class="hint" id="pwhint" aria-live="polite">Optional. Without one, your agent pays 0.10 USDC via x402.</p>
+</form>
+
+<style>
+	form { display:grid; grid-template-columns:1.2fr 1fr auto; gap:8px 8px; margin-bottom:20px; align-items:start }
+	input { font:inherit; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); min-width:0; width:100% }
+	input:focus-visible { outline:2px solid var(--accent); outline-offset:1px }
+	input#ticker { text-transform:uppercase }
+	input.invalid { border-color:var(--err); outline-color:var(--err) }
+	.field { position:relative; min-width:0 }
+	.field input { padding-right:64px }
+	/* The coupon is a password in all but name; a text input with a mask avoids password-manager prompts. */
+	input.masked { -webkit-text-security:disc }
+	.reveal { position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:0; padding:6px 8px; color:var(--muted); font:13px/1 inherit; font-family:inherit; cursor:pointer; border-radius:6px }
+	.reveal:hover { color:var(--fg); background:var(--chip) }
+	.hint { grid-column:2; margin:0; color:var(--muted); font-size:13px; line-height:1.4 }
+	.hint.err { color:var(--err) }
+	.hint.warn { color:var(--warn) }
+	.hint.warn .linkbtn { font-size:13px }
+	#tickerhint, #recent { grid-column:1 }
+	@media (max-width:560px) {
+		form { grid-template-columns:1fr }
+		.hint { grid-column:1 }
+	}
+</style>
+
+<script>
+	import { emit, on } from '../scripts/bus.ts';
+	import { $, esc, normTicker, params, RUN_ID, scrollMode, show } from '../scripts/dom.ts';
+	import { relTime } from '../scripts/time.ts';
+	import type { Joke } from '../scripts/types.ts';
+
+	const ticker = $<HTMLInputElement>('#ticker'), go = $<HTMLButtonElement>('#go'), reveal = $<HTMLButtonElement>('#reveal');
+	const pwhint = $('#pwhint'), tickerhint = $('#tickerhint'), recentEl = $('#recent'), recentText = $('#recent-text'), tickers = $<HTMLDataListElement>('#tickers');
+	let password = $<HTMLInputElement>('#password'); // replaced on every Show/Hide toggle, see remaskPassword
+	const PW_HINT = 'Optional. Without one, your agent pays 0.10 USDC via x402.';
+
+	// A working coupon is remembered in the browser.
+	const savedPassword = () => { try { return localStorage.getItem('joke-password') || ''; } catch { return ''; } };
+	const savePassword = (v: string) => { try { if (v) localStorage.setItem('joke-password', v); else localStorage.removeItem('joke-password'); } catch {} };
+	password.value = savedPassword();
+
+	const setPwHint = (text: string, isError: boolean) => { pwhint.textContent = text; pwhint.classList.toggle('err', isError); password.classList.toggle('invalid', isError); };
+	const onPasswordInput = () => { if (pwhint.classList.contains('err')) setPwHint(PW_HINT, false); };
+	password.addEventListener('input', onPasswordInput);
+
+	// Chrome does not reliably repaint an input when -webkit-text-security changes:
+	// the old mask (or the old plain text) stays until the field is focused, and
+	// re-setting the value stopped being enough in Chrome 155. A brand-new element
+	// always paints with its current style, so each toggle swaps the field for a
+	// clone, keeping the value, the caret and the other classes.
+	const remaskPassword = (masked: boolean) => {
+		const old = password, focused = document.activeElement === old;
+		const [a, b] = focused ? [old.selectionStart, old.selectionEnd] : [null, null];
+		const fresh = old.cloneNode(false) as HTMLInputElement;
+		fresh.classList.toggle('masked', masked);
+		fresh.value = old.value;
+		fresh.addEventListener('input', onPasswordInput);
+		old.replaceWith(fresh);
+		password = fresh;
+		if (focused) { fresh.focus(); if (a != null) try { fresh.setSelectionRange(a, b); } catch {} }
+	};
+	reveal.addEventListener('click', () => {
+		const showIt = password.classList.contains('masked');
+		remaskPassword(!showIt);
+		reveal.textContent = showIt ? 'Hide' : 'Show';
+		reveal.setAttribute('aria-pressed', String(showIt));
+		reveal.setAttribute('aria-label', showIt ? 'Hide coupon code' : 'Show coupon code');
+	});
+
+	function setTickerError(msg: string) { tickerhint.textContent = msg; show(tickerhint, !!msg); ticker.classList.toggle('invalid', !!msg); ticker.setAttribute('aria-invalid', msg ? 'true' : 'false'); }
+	ticker.addEventListener('input', () => { if (!tickerhint.classList.contains('hidden')) setTickerError(''); hideRecent(); });
+
+	// A coupon run minutes after the last one for the same ticker spends real
+	// USDC on a near-identical joke, so ask first and point at the fresh one.
+	const RECENT_MS = 600000;
+	let recent: { joke: Joke; sym: string; pw: string } | null = null; // while the hint is showing
+	const hideRecent = () => { recent = null; show(recentEl, false); };
+	async function recentJoke(sym: string): Promise<Joke | null> {
+		try {
+			const r = await fetch(`/api/jokes/latest?ticker=${encodeURIComponent(sym)}`);
+			if (!r.ok) return null;
+			const { joke } = (await r.json()) as { joke: Joke | null };
+			return joke && Date.now() - Date.parse(joke.createdAt) < RECENT_MS ? joke : null;
+		} catch { return null; }
+	}
+	$('#recent-run').addEventListener('click', () => { if (!recent) return; const { sym, pw } = recent; hideRecent(); emit('run:submit', { sym, pw }); });
+	$('#recent-show').addEventListener('click', () => { if (recent) emit('feed:highlight', { joke: recent.joke }); });
+
+	$<HTMLFormElement>('#form').addEventListener('submit', async (e) => {
+		e.preventDefault();
+		const sym = normTicker(ticker.value); if (!sym) return;
+		ticker.value = sym;
+		const pw = password.value.trim();
+		hideRecent();
+		if (pw) { // a coupon run is a real spend; a recent joke for the same ticker is worth a pause
+			go.disabled = true;
+			const j = await recentJoke(sym);
+			go.disabled = false;
+			if (j) { recent = { joke: j, sym, pw }; recentText.textContent = `A joke about ${sym} was made ${relTime(j.createdAt)}.`; show(recentEl, true); return; }
+		}
+		emit('run:submit', { sym, pw }); // no coupon: the 402 card with agent instructions appears
+	});
+
+	on('run:busy', ({ busy }) => { go.disabled = busy; go.textContent = busy ? 'Working…' : 'Tell me a joke'; });
+	on('run:reset', () => { setPwHint(PW_HINT, false); setTickerError(''); hideRecent(); });
+	on('run:bad-ticker', ({ message }) => { setTickerError(message); ticker.select(); });
+	on('run:bad-coupon', () => savePassword(''));
+	on('run:accepted', ({ pw }) => { if (pw) savePassword(pw); });
+	on('run:paywall', ({ pwError }) => {
+		if (pwError) { setPwHint(pwError, true); password.focus(); password.select(); }
+		else setPwHint('No coupon entered: the instructions below let your agent pay instead.', false);
+	});
+	on('form:clear', () => { ticker.value = ''; ticker.focus(); window.scrollTo({ top: 0, behavior: scrollMode }); });
+	on('feed:tickers', ({ tickers: list }) => { tickers.innerHTML = list.map((t) => `<option value="${esc(t)}"></option>`).join(''); });
+
+	// Deep links: ?run=<id> (resumed by run.ts) names the ticker in the id; ?ticker=AMD prefills the field.
+	const runParam = params.get('run');
+	if (runParam && RUN_ID.test(runParam)) ticker.value = normTicker(runParam.split('-')[1] || '');
+	else {
+		const t = normTicker(params.get('ticker') || '');
+		if (t) { ticker.value = t; ticker.focus(); try { ticker.setSelectionRange(t.length, t.length); } catch {} }
+	}
+</script>

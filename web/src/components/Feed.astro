@@ -1,0 +1,18 @@
+---
+/** The live feed of every joke, newest first; the cards are built by scripts/feed.ts. */
+---
+
+<div class="feed" id="feed"><p class="muted" id="feedempty">Loading the feed…</p></div>
+<div class="more hidden" id="morewrap"><button type="button" class="secondary" id="more">Show older jokes</button></div>
+
+<style>
+	.feed { display:grid; gap:10px }
+	.feed :global(.card) { margin:0; min-width:0; overflow:hidden }
+	.feed :global(.card.target) { box-shadow:0 0 0 3px var(--accent) }
+	.feed :global(.joke) { font-size:17px }
+	.more { display:flex; justify-content:center; margin-top:12px }
+</style>
+
+<script>
+	import '../scripts/feed.ts';
+</script>

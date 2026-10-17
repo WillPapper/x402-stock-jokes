@@ -1,0 +1,78 @@
+---
+/** The 402 card: how an agent pays 0.10 USDC with x402, the coupon alternative, and the latest cached joke. */
+---
+
+<section class="card pay hidden" id="paywall">
+	<div class="step-title">A joke about <span id="paysym"></span> costs 0.10 USDC</div>
+	<p class="step-detail tight">Paid by your agent with x402, no account or API key needed.</p>
+	<ol class="howto">
+		<li>Your agent needs a wallet with a little USDC on <b>Base mainnet</b> (no ETH needed).</li>
+		<li>Copy the instructions and paste them to your agent. They explain the 402 → sign → retry flow and how to read the joke back.</li>
+		<li>It POSTs to <code id="payurl"></code>, pays 0.10 USDC, polls the returned URL, and shows you the joke, the facts and the receipts.</li>
+	</ol>
+	<div class="actions"><button type="button" id="copy-pay">Copy instructions for my agent</button> <a class="linkbtn" href="/agent.md" target="_blank" rel="noopener">Open agent.md</a> <span class="step-detail" id="copied" aria-live="polite"></span></div>
+	<details><summary class="step-detail">Minimal TypeScript</summary><pre id="paycurl"></pre></details>
+	<hr />
+	<div class="step-title coupon">Have a coupon code? Then the joke is free</div>
+	<p class="step-detail coupon-detail">Here: enter it next to the ticker and press "Tell me a joke" again. For your agent: send it in an <code>X-Joke-Password</code> header on the POST instead of paying (the copied instructions explain this).</p>
+	<div id="cachedwrap" class="hidden">
+		<p class="muted cached-lead">Meanwhile, the latest joke for <span id="cachedticker"></span> <span id="cachedwhen"></span>:</p>
+		<p class="joke cached-joke" id="cachedjoke"></p>
+		<div class="receipts" id="cachedreceipts"></div>
+	</div>
+</section>
+
+<style>
+	.pay { border-color:var(--warn) }
+	.pay .step-title { font-size:17px }
+	.pay .step-title.coupon { font-size:15px }
+	.tight { margin:2px 0 0 }
+	.coupon-detail { margin:4px 0 0 }
+	.howto { margin:8px 0 12px; padding-left:20px; font-size:15px }
+	.howto li { margin:4px 0 }
+	.actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap }
+	hr { border:0; border-top:1px solid var(--line); margin:16px 0 }
+	.cached-lead { margin:14px 0 4px }
+	.cached-joke { font-size:18px }
+</style>
+
+<script>
+	import { on } from '../scripts/bus.ts';
+	import { $, PUBLIC, scrollMode, show } from '../scripts/dom.ts';
+	import { receiptsRow, wireBadges } from '../scripts/receipts.ts';
+	import { timeEl } from '../scripts/time.ts';
+
+	const card = $('#paywall'), paysym = $('#paysym'), payurl = $('#payurl'), paycurl = $('#paycurl'), copied = $('#copied');
+	const cachedWrap = $('#cachedwrap'), cachedTicker = $('#cachedticker'), cachedWhen = $('#cachedwhen'), cachedJoke = $('#cachedjoke'), cachedReceipts = $('#cachedreceipts');
+	let sym = 'NVDA'; // the ticker the card was last shown for
+
+	// "Copy instructions for my agent": agent.md with the ticker filled in, plus a one-line brief on top.
+	let agentMd: string | null = null;
+	async function agentInstructions(): Promise<string> {
+		if (!agentMd) agentMd = await (await fetch('/agent.md')).text();
+		return `Get me a joke about ${sym} from ${PUBLIC}. It costs 0.10 USDC on Base via x402; pay it from my wallet, then poll for the joke and show me the joke, the "Based on" facts and the "Paid" receipts. (If I give you a coupon code, send it as an X-Joke-Password header instead of paying.) Full instructions follow.\n\n` + agentMd.replace(/<TICKER>/g, sym).replace(/NVDA\./g, sym + '.');
+	}
+	$('#copy-pay').addEventListener('click', async () => {
+		const text = await agentInstructions();
+		try { await navigator.clipboard.writeText(text); copied.textContent = 'Copied. Paste it to your agent.'; }
+		catch { window.open('/agent.md', '_blank'); copied.textContent = 'Clipboard blocked; opened agent.md instead.'; }
+		setTimeout(() => { copied.textContent = ''; }, 4000);
+	});
+
+	on('run:reset', () => { show(card, false); show(cachedWrap, false); });
+	on('run:paywall', ({ cached, sym: s, pwError }) => {
+		sym = s;
+		const url = `${PUBLIC}/joke/${s}`;
+		payurl.textContent = url; paysym.textContent = s;
+		paycurl.textContent = `// any x402 client works; with @x402/fetch:\nconst res = await fetchWithPayment("${url}", { method: "POST" }); // pays 0.10 USDC\nconst { poll } = await res.json();\n// then GET poll every few seconds until done === true;\n// the JSON has joke, basedOn, steps and payments`;
+		if (cached) {
+			cachedTicker.textContent = cached.ticker; cachedJoke.textContent = cached.joke;
+			cachedWhen.innerHTML = cached.createdAt ? `(${timeEl(cached.createdAt)})` : '';
+			cachedReceipts.innerHTML = receiptsRow(cached); wireBadges(card, cached);
+			show(cachedWrap, true);
+		}
+		show(card, true);
+		// A rejected coupon keeps the focus on the field instead (JokeForm).
+		if (!pwError) card.scrollIntoView({ block: 'start', behavior: scrollMode });
+	});
+</script>

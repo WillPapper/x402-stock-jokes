@@ -1,0 +1,19 @@
+---
+/** The paying wallet's address and USDC balance, from /api/wallet. */
+---
+
+<footer id="wallet">Loading wallet…</footer>
+
+<style>
+	footer { color:var(--muted); font-size:13px; margin-top:24px }
+</style>
+
+<script>
+	import { $, esc } from '../scripts/dom.ts';
+
+	interface Wallet { address: string; basescan: string; usdc: string | null; permit2Approved: boolean | null }
+	const wallet = $('#wallet');
+	fetch('/api/wallet').then((r) => r.json()).then((w: Wallet) => {
+		wallet.innerHTML = `Paying from <a href="${esc(w.basescan)}" target="_blank" rel="noopener">${esc(w.address.slice(0, 6))}…${esc(w.address.slice(-4))}</a> on Base${w.usdc != null ? ` · ${Number(w.usdc).toFixed(3)} USDC left` : ''}${w.permit2Approved === false ? ' · <span class="err">Permit2 not approved</span>' : ''}`;
+	}).catch(() => { wallet.textContent = 'Wallet status unavailable.'; });
+</script>

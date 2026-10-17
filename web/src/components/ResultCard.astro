@@ -1,0 +1,46 @@
+---
+/** The finished run's joke (or its failure), with the permalink and "Tell me another". */
+---
+
+<section class="card hidden" id="result" aria-live="polite">
+	<div class="meta"><span><span class="ticker" id="r-ticker"></span><span id="r-title"></span></span><span id="r-when"></span></div>
+	<p class="joke" id="joke"></p>
+	<p class="based" id="based"></p>
+	<p class="paid hidden" id="paid"></p>
+	<p class="err hidden" id="error"></p>
+	<div class="result-actions"><button type="button" class="secondary" id="another">Tell me another</button><a id="permalink" href="#" target="_blank" rel="noopener">Permalink</a><a id="permalink-json" href="#" target="_blank" rel="noopener">Run status (JSON)</a></div>
+</section>
+
+<style>
+	.paid { color:var(--muted); font-size:14px; margin:8px 0 0 }
+	.result-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:14px; font-size:14px }
+</style>
+
+<script>
+	import { emit, on } from '../scripts/bus.ts';
+	import { $, scrollMode, show } from '../scripts/dom.ts';
+	import { timeEl } from '../scripts/time.ts';
+
+	const card = $('#result'), rTicker = $('#r-ticker'), rTitle = $('#r-title'), rWhen = $('#r-when');
+	const joke = $('#joke'), based = $('#based'), paid = $('#paid'), error = $('#error'), another = $<HTMLButtonElement>('#another');
+	const permalink = $<HTMLAnchorElement>('#permalink'), permalinkJson = $<HTMLAnchorElement>('#permalink-json');
+
+	on('run:reset', () => {
+		for (const el of [card, paid, error]) show(el, false);
+		joke.textContent = ''; based.textContent = ''; paid.textContent = '';
+	});
+	on('run:result', (r) => {
+		rTicker.textContent = r.sym; rTitle.textContent = r.title; rWhen.innerHTML = timeEl(r.when);
+		permalink.href = `/j/${encodeURIComponent(r.id)}`; permalinkJson.href = `/joke/${encodeURIComponent(r.id)}`;
+		if (r.joke) { joke.textContent = r.joke; based.textContent = r.based; }
+		if (r.failed) { error.textContent = r.failed; show(error, true); }
+		another.textContent = r.failed ? 'Try another ticker' : 'Tell me another';
+		show(card, true); card.classList.remove('new'); void card.offsetWidth; card.classList.add('new');
+		card.scrollIntoView({ block: 'start', behavior: scrollMode });
+	});
+	on('run:cost', ({ paid: p }) => {
+		paid.textContent = `Paid on-chain: ${p.totalUsdc.toFixed(4)} USDC (StockTwits + Ceramic ${p.exactUsdc.toFixed(4)}, AI Gateway ${p.aiUsdc.toFixed(4)} settled for the joke and the agent's turns).`;
+		show(paid, true);
+	});
+	another.addEventListener('click', () => emit('form:clear'));
+</script>

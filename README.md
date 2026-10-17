@@ -139,7 +139,7 @@ Payment records are stored with the Cloudflare account id already stripped from 
 
 ## The page
 
-`public/index.html`, no framework. You enter a ticker, nothing else. Every joke card's StockTwits, Ceramic and AI Gateway badges expand into an "under the hood" panel with that service's full response, the facts passed to the model, the payment, and links to the conversation JSON and the x402 gateway events; the same works on the live run's step rows. Jokes made before the step archive existed (2026-10-16) show a note instead. The 402 card then offers two paths: copy the agent instructions (your agent pays 0.10 USDC with x402), or type a coupon code for a free joke; a working coupon is remembered in the browser. The run shows each of the three steps and the agent's turns with receipt chips, then the joke and the facts behind it. Below: a live feed of every joke ever made (polled from D1 every 3 s), counters, and a jokes-per-hour sparkline.
+`web/`, an Astro site: one component per card (`web/src/components/`), the client logic as TypeScript modules (`web/src/scripts/`, components talk through typed events), shared styles in `web/src/styles/global.css`, and no client framework beyond that. You enter a ticker, nothing else. Every joke card's StockTwits, Ceramic and AI Gateway badges expand into an "under the hood" panel with that service's full response, the facts passed to the model, the payment, and links to the conversation JSON and the x402 gateway events; the same works on the live run's step rows. Jokes made before the step archive existed (2026-10-16) show a note instead. The 402 card then offers two paths: copy the agent instructions (your agent pays 0.10 USDC with x402), or type a coupon code for a free joke; a working coupon is remembered in the browser. The run shows each of the three steps and the agent's turns with receipt chips, then the joke and the facts behind it. Below: a live feed of every joke ever made (polled from D1 every 3 s), counters, and a jokes-per-hour sparkline.
 
 **Money numbers come from the chain, not from estimates.** Every x402 payment is a USDC transfer out of the app wallet, so `/api/stats` reads the wallet's USDC history through Alchemy's Transfers API (`ALCHEMY_API_KEY`) and reports **USDC paid on-chain** per seller and the number of x402 jokes sold (from the gateway's `PAYMENT-CONTEXT` amounts). The `upto` scheme never moves the authorized ceiling: AI Gateway settles only the real token cost, within seconds of each call. StockTwits and Ceramic amounts are matched to each joke by transaction hash; AI Gateway settlements by a time window around the joke (so concurrent jokes can share a settlement).
 
@@ -174,8 +174,10 @@ bun run db:migrate:local   # D1 schema for the local dev database
 ## Run locally
 
 ```sh
-bun run dev       # http://localhost:5173
+bun run dev       # the Worker at http://localhost:5173 and the page at http://localhost:4321
 ```
+
+`bun run dev:worker` and `bun run dev:web` start either alone; `API_ORIGIN=https://jokes.papper.me bun run dev:web` serves the page against production data, which is the quickest way to work on the UI.
 
 Open the page, type a ticker and the password, watch the three steps pay and complete. Or use the agent API directly:
 
@@ -211,7 +213,7 @@ await fetchWithPayment("https://jokes.papper.me/agents/joke/my-id", { method: "P
 ```sh
 bunx wrangler login
 bun run db:migrate                  # D1 schema (once per migration)
-bun run deploy                      # vite build && wrangler deploy; creates the jokes.papper.me custom domain
+bun run deploy                      # vite build (Worker) + astro build (page into dist/client), then wrangler deploy; creates the jokes.papper.me custom domain
 # upload the six secrets (a JSON object of name → value; keep the file out of git):
 bunx wrangler secret bulk secrets.json --name x402-stock-jokes
 ```
@@ -244,7 +246,9 @@ src/lib/db.ts                  D1 `jokes`: insert, complete, feed, per-ticker la
 src/lib/transfers.ts           the wallet's USDC transfers from Alchemy: USDC paid per seller, earned
 src/lib/alchemy.ts             Alchemy JSON-RPC: free key first, x402 gateway credits (SIWE, $1 top-ups) when the key is out of capacity
 src/lib/budget.ts, ledger.ts   spend caps; the PaymentRecord shape and this isolate's recent payments
-public/index.html              the page
+web/src/pages/index.astro      the page; components in web/src/components, client scripts in web/src/scripts, styles in web/src/styles
+src/routes/permalink.ts        /j/<id>, server-rendered with the page's stylesheet inlined
+public/                        served as-is: agent.md, favicon.svg
 migrations/                    D1 schema
 scripts/                       wallet:new, approve, doctor, pay-for-joke
 ```

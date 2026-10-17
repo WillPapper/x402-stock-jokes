@@ -1,0 +1,33 @@
+---
+/** The page: ask for a joke, watch the paid steps, read the feed. */
+import Base from '../layouts/Base.astro';
+import Feed from '../components/Feed.astro';
+import JokeForm from '../components/JokeForm.astro';
+import Paywall from '../components/Paywall.astro';
+import ResultCard from '../components/ResultCard.astro';
+import RunCard from '../components/RunCard.astro';
+import Stats from '../components/Stats.astro';
+import WalletFooter from '../components/WalletFooter.astro';
+
+const description = 'A Flue agent that pays StockTwits, Ceramic and Cloudflare AI Gateway per request with USDC on Base (x402) to write one joke about a stock.';
+---
+
+<Base title="Stock Jokes" {description}>
+	<h1>Stock Jokes</h1>
+	<p class="sub">One joke per ticker. Every step is an x402 micro-payment in USDC on Base: StockTwits for the chatter, Ceramic for the news, Cloudflare AI Gateway for the punchline and for the agent's own turns.</p>
+
+	<JokeForm />
+	<ResultCard />
+	<Paywall />
+	<RunCard />
+
+	<h2>Live feed <small id="feedcount"></small></h2>
+	<Stats />
+	<Feed />
+
+	<WalletFooter />
+</Base>
+
+<style>
+	.sub { color:var(--muted); margin:0 0 22px }
+</style>
