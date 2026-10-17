@@ -9,6 +9,7 @@
  */
 import { env } from 'cloudflare:workers';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { claimPaymentToken } from './db.ts';
 import { jwtPayload, logEvent } from './log.ts';
 
 export const PASSWORD_HEADER = 'x-joke-password';
@@ -18,6 +19,34 @@ export const PUBLIC_HOST = 'jokes.papper.me';
 export const PRICE_USDC = '0.10';
 
 export type Access = { ok: true; by: 'password' | 'x402'; amount?: string } | { ok: false; status: 401 | 402; reason: string };
+
+/**
+ * The URL the buyer actually paid for. `POST /joke/<TICKER>` forwards to the
+ * gated agent route in-process; the forwarder records the original request URL
+ * here so the PAYMENT-CONTEXT audience can be checked against what was paid
+ * for, not against the internal URL. Keyed by the Request object itself, so
+ * nothing a client sends can set it.
+ */
+export const paidResource = new WeakMap<Request, string>();
+
+async function sha256Hex(text: string): Promise<string> {
+	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+	return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** The audience is the URL the gateway charged for; it must be this resource on this host. */
+function audienceMatches(aud: string, resource: URL): { ok: true } | { ok: false; why: string } {
+	let audUrl: URL | null = null;
+	try {
+		audUrl = new URL(aud);
+	} catch {
+		audUrl = null;
+	}
+	if (!audUrl) return aud.includes(resource.host) || aud.includes(PUBLIC_HOST) ? { ok: true } : { ok: false, why: `payment context is for another resource (${aud})` };
+	if (audUrl.host !== resource.host && audUrl.host !== PUBLIC_HOST) return { ok: false, why: `payment context is for another host (${audUrl.host})` };
+	if (audUrl.pathname !== resource.pathname) return { ok: false, why: `payment context paid for ${audUrl.pathname}, not ${resource.pathname}` };
+	return { ok: true };
+}
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
@@ -37,7 +66,8 @@ export async function checkAccess(request: Request, conversationId?: string): Pr
 		logEvent('gate', access.ok, { ...base, ...extra, ...(access.ok ? { by: access.by, amount: access.amount ?? null } : { status: access.status, reason: access.reason }) }, { conversationId: conversationId ?? null, label: access.ok ? `admitted:${access.by}` : `denied:${access.status}` });
 		return access;
 	};
-	const given = request.headers.get(PASSWORD_HEADER) ?? url.searchParams.get('password');
+	// Header only: a coupon in the query string would land in request logs and browser history.
+	const given = request.headers.get(PASSWORD_HEADER);
 	if (given !== null) {
 		// Case-insensitive: phones auto-capitalize the first letter, desktops don't.
 		if (expected && timingSafeEqual(given.trim().toLowerCase(), expected.trim().toLowerCase())) return done({ ok: true, by: 'password' });
@@ -51,9 +81,19 @@ export async function checkAccess(request: Request, conversationId?: string): Pr
 			jwks ??= createRemoteJWKSet(new URL(JWKS_URL));
 			const { payload, protectedHeader } = await jwtVerify(token, jwks, { algorithms: ['EdDSA'] });
 			const aud = Array.isArray(payload.aud) ? payload.aud[0] : payload.aud;
-			if (aud && !aud.includes(url.host) && !aud.includes(PUBLIC_HOST)) {
-				return done({ ok: false, status: 401, reason: `payment context is for another resource (${aud})` }, { claims, kid: protectedHeader.kid ?? null });
+			const resource = new URL(paidResource.get(request) ?? request.url);
+			if (aud) {
+				const match = audienceMatches(aud, resource);
+				if (!match.ok) return done({ ok: false, status: 401, reason: match.why }, { claims, kid: protectedHeader.kid ?? null, resource: resource.pathname });
 			}
+			// One payment, one joke: a token that already admitted a request is refused.
+			// The token never reaches the buyer (gateway to origin only), so this guards
+			// against an origin-side leak. D1 trouble admits the paid request and logs it.
+			const claimed = await claimPaymentToken(await sha256Hex(token), aud ?? null, conversationId ?? null).catch((err) => {
+				console.warn('payment token claim failed', (err as Error).message.slice(0, 120));
+				return true;
+			});
+			if (!claimed) return done({ ok: false, status: 401, reason: 'payment context already used for a joke' }, { claims, kid: protectedHeader.kid ?? null, replay: true });
 			return done({ ok: true, by: 'x402', amount: typeof payload.amount === 'string' ? payload.amount : undefined }, { claims, kid: protectedHeader.kid ?? null });
 		} catch (err) {
 			return done({ ok: false, status: 401, reason: `payment context rejected: ${(err as Error).message}` }, { claims });

@@ -1,10 +1,10 @@
 import { setProvider } from '@flue/runtime';
 import { createAgentRouter } from '@flue/runtime/routing';
-import { Hono } from 'hono';
+import { type Context, Hono, type Next } from 'hono';
 import { createPublicClient, erc20Abi, fallback, formatUnits, http } from 'viem';
 import { base } from 'viem/chains';
 import { Joke } from './agents/joke.ts';
-import { PRICE_USDC, checkAccess, paymentRequiredBody } from './lib/access.ts';
+import { PRICE_USDC, checkAccess, paidResource, paymentRequiredBody } from './lib/access.ts';
 import { jokeConversationId } from './lib/ids.ts';
 import { createX402AiGatewayProvider } from './lib/ai-gateway-provider.ts';
 import { jokeForConversation, jokeStats, latestJokeFor, listJokes, recordAccess, type JokeRow } from './lib/db.ts';
@@ -14,6 +14,7 @@ import { ledger } from './lib/ledger.ts';
 import { listEvents, logEvent } from './lib/log.ts';
 import { requireInternal } from './lib/internal.ts';
 import { redactAccountIds } from './lib/redact.ts';
+import { basescanTxUrl } from './lib/tx.ts';
 import { PERMIT2, USDC_BASE, walletFromKey } from './lib/x402.ts';
 import { tickerKnown } from './tools/stocktwits.ts';
 
@@ -30,6 +31,19 @@ setProvider(
 
 const app = new Hono();
 
+// The finished conversation served by the Flue router carries the agent's
+// payment records, whose AI Gateway URLs name the Cloudflare account. Redact
+// JSON bodies on the way out, like the feed does; streams carry no payment URLs.
+async function redactedPassthrough(c: Context, next: Next) {
+	await next();
+	const res = c.res;
+	if (!res.headers.get('content-type')?.includes('application/json')) return;
+	const body = (await res.json()) as unknown;
+	const headers = new Headers(res.headers);
+	headers.delete('content-length');
+	c.res = new Response(JSON.stringify(redactAccountIds(body)), { status: res.status, statusText: res.statusText, headers });
+}
+
 // Submitting a message costs money (every step pays with x402), so a POST needs
 // either the password or a Monetization Gateway payment. Reads stay free.
 // Reads are public but must never reach the agent's Durable Object while it is
@@ -40,13 +54,13 @@ const app = new Hono();
 app.post('/agents/joke/:id/abort', (c) => c.json({ error: 'not_public', message: 'abort is internal' }, 403));
 app.use('/agents/joke/:id/:rest{.+}', async (c, next) => {
 	const st = await statusFromDb(c.req.param('id'));
-	return st.done ? next() : c.json({ ...st, note: 'The joke is still generating. The full conversation will be served here once complete.' });
+	return st.done ? redactedPassthrough(c, next) : c.json({ ...st, note: 'The joke is still generating. The full conversation will be served here once complete.' });
 });
 app.use('/agents/joke/:id', async (c, next) => {
 	const id = c.req.param('id');
 	if (c.req.method !== 'POST') {
 		const st = await statusFromDb(id);
-		return st.done ? next() : c.json({ ...st, note: 'The joke is still generating. The full conversation will be served here once complete.' });
+		return st.done ? redactedPassthrough(c, next) : c.json({ ...st, note: 'The joke is still generating. The full conversation will be served here once complete.' });
 	}
 	const access = await checkAccess(c.req.raw, id);
 	if (!access.ok) {
@@ -105,7 +119,9 @@ app.post('/joke/:ticker', async (c) => {
 		const v = c.req.header(h);
 		if (v) headers.set(h, v);
 	}
-	const res = await app.fetch(new Request(new URL(`/agents/joke/${id}`, c.req.url), { method: 'POST', headers, body: JSON.stringify({ kind: 'user', body: `Tell me a joke about ${ticker}.` }) }), c.env, c.executionCtx);
+	const forward = new Request(new URL(`/agents/joke/${id}`, c.req.url), { method: 'POST', headers, body: JSON.stringify({ kind: 'user', body: `Tell me a joke about ${ticker}.` }) });
+	paidResource.set(forward, c.req.url); // the PAYMENT-CONTEXT audience names this URL, not the internal one
+	const res = await app.fetch(forward, c.env, c.executionCtx);
 	if (!res.ok) return res;
 	const origin = new URL(c.req.url).origin;
 	return c.json({ id, ticker, status: 'accepted', poll: `${origin}/joke/${id}`, note: 'Poll the `poll` URL every few seconds (free) until `done` is true.' }, 202);
@@ -147,7 +163,7 @@ async function statusFromDb(id: string) {
 		if (e.kind === 'x402.payment') {
 			const attempts = (d.attempts as { paymentResponse?: { transaction?: string } }[] | undefined) ?? [];
 			const tx = attempts.map((a) => a.paymentResponse?.transaction).find(Boolean) ?? null;
-			if (d.authorizedUsdc || !e.ok) payments.push({ label: e.label ?? String(d.label ?? ''), authorizedUsdc: (d.authorizedUsdc as string | null) ?? null, scheme: (d.scheme as string | null) ?? null, tx: tx ? `https://basescan.org/tx/${tx}` : null, ok: e.ok, at: e.ts });
+			if (d.authorizedUsdc || !e.ok) payments.push({ label: e.label ?? String(d.label ?? ''), authorizedUsdc: (d.authorizedUsdc as string | null) ?? null, scheme: (d.scheme as string | null) ?? null, tx: basescanTxUrl(tx), ok: e.ok, at: e.ts });
 		}
 		if (e.kind === 'ai.turn' && e.ok) turns++;
 		if (!e.ok && (e.kind === 'ai.turn' || e.kind === 'tool.error' || e.kind === 'error')) lastFailure = { at: e.ts, error: String(d.error ?? d.reason ?? e.label ?? 'failed').slice(0, 300) };

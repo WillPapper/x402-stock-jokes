@@ -10,6 +10,7 @@
  * `onReceipt`, so callers can show Basescan links.
  */
 import { x402Client } from '@x402/core/client';
+import { basescanTxUrl } from './tx.ts';
 import { ExactEvmScheme } from '@x402/evm/exact/client';
 import { UptoEvmScheme } from '@x402/evm/upto/client';
 import { wrapFetchWithPayment } from '@x402/fetch';
@@ -120,7 +121,7 @@ export function decodePaymentRequired(header: string | null): PaymentRequired | 
 }
 
 export function basescanTx(receipt: Receipt | null): string | null {
-	return receipt?.transaction ? `https://basescan.org/tx/${receipt.transaction}` : null;
+	return basescanTxUrl(receipt?.transaction);
 }
 
 /** The amount in the typed data the x402 client asks the wallet to sign. */

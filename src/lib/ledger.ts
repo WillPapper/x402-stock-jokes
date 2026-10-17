@@ -6,6 +6,7 @@
  */
 import type { ReceiptEvent } from './x402.ts';
 import { formatUsdc } from './budget.ts';
+import { basescanTxUrl } from './tx.ts';
 
 export interface PaymentRecord {
 	at: string;
@@ -30,7 +31,7 @@ export const ledger = {
 			scheme: event.url.includes('/ai/run') ? 'upto' : event.receipt ? 'exact' : 'unknown',
 			authorizedUsdc: formatUsdc(event.authorized),
 			settled: event.settled,
-			tx: event.receipt?.transaction ? `https://basescan.org/tx/${event.receipt.transaction}` : null,
+			tx: basescanTxUrl(event.receipt?.transaction),
 		};
 		records.push(rec);
 		if (records.length > 500) records.splice(0, records.length - 500);

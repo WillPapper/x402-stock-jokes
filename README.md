@@ -91,8 +91,8 @@ They apply in `bun run dev`, in production, and in the scripts, which read `wran
 
 Submitting a joke (`POST /joke/<TICKER>` or `POST /agents/joke/<id>`) spends real money, so it needs one of:
 
-- a coupon code, in the `X-Joke-Password` header (or `?password=`), stored as the `JOKE_PASSWORD` secret; or
-- an x402 payment of **0.10 USDC** to the app, handled by Cloudflare's Monetization Gateway in front of `jokes.papper.me`. The gateway answers the first request with a real x402 `402` quote, verifies the signed USDC authorization on the retry, and forwards the request with a signed `PAYMENT-CONTEXT` JWT that the Worker verifies against `https://payments.cloudflare.com/certs` (`src/lib/access.ts`).
+- a coupon code, in the `X-Joke-Password` header (header only, never the URL), stored as the `JOKE_PASSWORD` secret; a WAF rate-limiting rule blocks an IP that sends more than 5 coupon POSTs in 10 seconds; or
+- an x402 payment of **0.10 USDC** to the app, handled by Cloudflare's Monetization Gateway in front of `jokes.papper.me`. The gateway answers the first request with a real x402 `402` quote, verifies the signed USDC authorization on the retry, and forwards the request with a signed `PAYMENT-CONTEXT` JWT that the Worker verifies against `https://payments.cloudflare.com/certs` (`src/lib/access.ts`). The token's audience must be the URL that was paid for, and each token admits exactly one request (hashes in the D1 `payment_tokens` table).
 
 Neither present: the gateway answers `402` with the x402 quote (and, off the gateway, the Worker answers `402` with instructions and the latest cached joke). Reading a conversation or a joke status (`GET`), the feed and the stats are always free.
 
@@ -114,7 +114,7 @@ Monetization Gateway and AI Gateway machine payments are US-only, and they evalu
 
 1. The entry Worker (any colo, any visitor) only checks the coupon or the gateway's payment and **queues** the message into `JokeRunner`, a Durable Object in the `us` jurisdiction (`src/cloudflare.ts`).
 2. The runner's **alarm**, which has no originating request, dispatches the agent as soon as the submit call has returned. The agent's Durable Object is placed next to the runner (ORD so far) and every paid call leaves from there with no visitor attached.
-3. **Nothing reads the agent's object.** Tools and the agent log progress to D1 (`events`), the finished joke goes to D1 (`jokes`), and `GET /joke/<id>` is served from D1. Conversation reads (`GET /agents/joke/<id>`, streams) answer 403 to everyone; abort needs the coupon header.
+3. **Nothing reads the agent's object.** Tools and the agent log progress to D1 (`events`), the finished joke goes to D1 (`jokes`), and `GET /joke/<id>` is served from D1. Conversation reads (`GET /agents/joke/<id>`, streams) answer with the D1 status until the run is done, then serve the conversation with the account id redacted; abort is not public.
 
 Verified with a Canadian VPN: submit, poll every 2 s, full run, all payments 200. The `gate` events record visitor country, runner and agent colo for every run. Full write-up and bug report: [docs/ai-gateway-visitor-country.md](./docs/ai-gateway-visitor-country.md).
 

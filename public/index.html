@@ -438,7 +438,7 @@
   function receiptChip(p, label) {
     if (!p) return '';
     const amt = money(p.authorizedUsdc) + ' USDC';
-    if (p.tx) return `<span class="chip">${label ? esc(label) + ' ' : ''}<a href="${p.tx}" target="_blank" rel="noopener" title="USDC transfer on Basescan">${amt} ↗</a></span>`;
+    if (p.tx) return `<span class="chip">${label ? esc(label) + ' ' : ''}<a href="${esc(p.tx)}" target="_blank" rel="noopener" title="USDC transfer on Basescan">${amt} ↗</a></span>`;
     return `<span class="chip" title="upto scheme: ceiling authorized, actual cost settled by AI Gateway">${label ? esc(label) + ' ' : ''}≤ ${amt}</span>`;
   }
   function receiptsRow(j) {
@@ -446,7 +446,7 @@
     const turns = pays.filter((p) => p.label.includes('orchestrator'));
     const find = (needle) => pays.find((p) => p.label.includes(needle));
     const st = find('StockTwits symbols'), ce = find('Ceramic'), jk = find('AI Gateway joke');
-    const group = (key, name, p) => `<span class="chipgroup"><button type="button" class="badge" data-k="${key}" aria-expanded="false" title="See what ${esc(name)} returned">${esc(name)}</button>${p ? (p.tx ? `<a href="${p.tx}" target="_blank" rel="noopener" title="USDC transfer on Basescan">${money(p.authorizedUsdc)} ↗</a>` : `<span class="amt" title="upto scheme: ceiling authorized, actual cost settled by AI Gateway">≤ ${money(p.authorizedUsdc)}</span>`) : ''}</span>`;
+    const group = (key, name, p) => `<span class="chipgroup"><button type="button" class="badge" data-k="${key}" aria-expanded="false" title="See what ${esc(name)} returned">${esc(name)}</button>${p ? (p.tx ? `<a href="${esc(p.tx)}" target="_blank" rel="noopener" title="USDC transfer on Basescan">${money(p.authorizedUsdc)} ↗</a>` : `<span class="amt" title="upto scheme: ceiling authorized, actual cost settled by AI Gateway">≤ ${money(p.authorizedUsdc)}</span>`) : ''}</span>`;
     return `${j.paidBy === 'x402' ? '<span class="chip x402" title="The buyer paid 0.10 USDC through the Monetization Gateway">paid via x402</span>' : ''}${group('stocktwits', 'StockTwits', st)}${group('ceramic', 'Ceramic', ce)}${group('joke', 'AI Gateway joke', jk)}${group('turns', `${turns.length} agent turn${turns.length === 1 ? '' : 's'}`, null)}${j.paid ? `<span class="chip" title="Settled USDC transfers for this joke: StockTwits + Ceramic ${j.paid.exactUsdc.toFixed(4)}, AI Gateway ${j.paid.aiUsdc.toFixed(4)}"><b>paid ${j.paid.totalUsdc.toFixed(4)} USDC</b> on-chain</span>` : ''}`;
   }
   function wireBadges(el, j) {

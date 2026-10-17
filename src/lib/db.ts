@@ -144,3 +144,15 @@ export async function accessFor(conversationId: string): Promise<{ paidBy: 'pass
 	const r = await db().prepare('SELECT paid_by, amount_usdc FROM access WHERE conversation_id = ?1').bind(conversationId).first<{ paid_by: string; amount_usdc: string | null }>();
 	return r ? { paidBy: r.paid_by as 'password' | 'x402', amountUsdc: r.amount_usdc } : null;
 }
+
+/**
+ * Record a PAYMENT-CONTEXT token (by hash) the first time it admits a request.
+ * Returns false when the same token was already recorded, i.e. a replay.
+ */
+export async function claimPaymentToken(tokenHash: string, aud: string | null, conversationId: string | null): Promise<boolean> {
+	const res = await db()
+		.prepare('INSERT OR IGNORE INTO payment_tokens (token_hash, aud, conversation_id, created_at) VALUES (?1, ?2, ?3, ?4)')
+		.bind(tokenHash, aud, conversationId, new Date().toISOString())
+		.run();
+	return (res.meta?.changes ?? 0) > 0;
+}
