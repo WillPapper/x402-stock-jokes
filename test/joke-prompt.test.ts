@@ -11,6 +11,7 @@ describe('joke prompt', () => {
 	test('forbids current-tense framing of old items and statistics', () => {
 		expect(SYSTEM).toMatch(/older than a month is history/);
 		expect(SYSTEM).toMatch(/pending, upcoming, happening now/);
+		expect(SYSTEM).toMatch(/old speculation, not news of today/);
 		expect(SYSTEM).toMatch(/Never recite statistics/);
 	});
 	test('withAge stamps dated facts and leaves the rest alone', () => {

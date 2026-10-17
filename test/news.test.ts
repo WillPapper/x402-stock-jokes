@@ -124,11 +124,13 @@ describe('rankNews recency gate', () => {
 			{ title: 'SpaceX IPO: The Ultimate Investors Guide to the Stars', url: 'https://ai-stocks.com/2025/09/28/spacex-ipo-guide/', description: 'SpaceX' },
 			{ title: 'SpaceX IPO 2026 Explained: How Indians Can Apply and Invest', url: 'https://newsx.com/spacex-ipo-2026-explained', description: 'SpaceX' },
 			{ title: 'Bloomberg analyst: Musk may use SPCX as the SpaceX ticker', url: 'https://x.test/2026/04/08/spcx', description: 'SpaceX IPO ticker' },
+			{ title: 'Naoris Protocol token price - NAORIS crypto - NAORIS live chart - NAORIS news', url: 'https://cointeeth.com/2026/04/08/naoris', description: 'SpaceX mention up front' },
 		];
 		const r = rankNews(raw, { company: 'SpaceX', symbol: 'SPCX', now, limit: 6 });
 		expect(r.items.map((i) => i.title)).toEqual(['Bloomberg analyst: Musk may use SPCX as the SpaceX ticker']);
 		expect(r.dropped['off-topic']).toBe(1);
 		expect(r.dropped.listicle).toBe(2);
+		expect(r.dropped.index).toBe(1);
 	});
 	test('an item far older than the newest is dropped as old', () => {
 		const raw = [

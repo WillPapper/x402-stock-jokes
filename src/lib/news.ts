@@ -75,6 +75,7 @@ const LISTICLE = [
 	/\bstocks? (stand out|in the spotlight|on investors'? radar)\b/i,
 ];
 const INDEX_PAGE = [
+	/\b(token|coin) price\b|\blive chart\b|\bprice prediction\b|\bpenny alerts?\b/i,
 	/\bstories, news (&|and) mentions\b/i,
 	/\b(stock )?(price|quote)s?,? (live chart|history|news|quote|forecast|analysis|market cap|how to buy)\b/i,
 	/\bnews (&|and) (articles|analysis|updates|headlines)\b/i,

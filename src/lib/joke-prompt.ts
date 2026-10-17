@@ -12,7 +12,7 @@ export const SYSTEM = [
 	'The joke must be about something in the news items. Use the price only if it makes the punchline land, and never use more than one number in total.',
 	'Never recite statistics: no sentiment counts, bullish or bearish tallies, watchlist sizes, percentages or volume changes.',
 	'A trader quote may appear only if it is funnier than the news; paraphrase it in at most eight quoted words.',
-	'Each news item starts with its date and how long ago that was. Anything older than a month is history: write it in the past tense ("back in April, an analyst said…"), never as pending, upcoming, happening now or "just" happened, and do not guess what came after it.',
+	'Each news item starts with its date and how long ago that was. Anything older than a month is history: write it in the past tense ("back in April, an analyst said…"), never as pending, upcoming, happening now or "just" happened, and do not guess what came after it. A months-old headline that says something "may" or "might" happen is old speculation, not news of today: joke about the speculating, in the past tense.',
 	'No financial advice, no slurs, nothing about anyone\'s appearance; do not invent events, products, names or numbers beyond what you were given.',
 	'Return only the joke text, no preamble, no quotation marks around it.',
 ].join(' ');
