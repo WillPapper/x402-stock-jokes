@@ -121,9 +121,41 @@ function stripHtml(s: string): string {
 		.trim();
 }
 
+/**
+ * Free ticker check, run before the agent (and its paid model turns) starts:
+ * the free stream endpoint answers 404 "Symbol not found" for a ticker
+ * StockTwits does not list, and 200 for one it does. Null means the check
+ * could not be made (network, rate limit), and the caller should proceed.
+ */
+const KNOWN_TTL_MS = 24 * 60 * 60_000;
+const UNKNOWN_TTL_MS = 60 * 60_000;
+const tickerChecks = new Map<string, { known: boolean; until: number }>();
+export async function tickerKnown(symbol: string): Promise<boolean | null> {
+	const sym = symbol.toUpperCase().replace(/[^A-Z0-9.]/g, '');
+	if (!sym) return false;
+	const cached = tickerChecks.get(sym);
+	if (cached && cached.until > Date.now()) return cached.known;
+	try {
+		const res = await fetch(`${STOCKTWITS_GATEWAY}/api/2/streams/symbol/${sym}.json`, { signal: AbortSignal.timeout(5000) });
+		if (res.status === 404) {
+			tickerChecks.set(sym, { known: false, until: Date.now() + UNKNOWN_TTL_MS });
+			return false;
+		}
+		if (!res.ok) return null;
+		await res.body?.cancel();
+		tickerChecks.set(sym, { known: true, until: Date.now() + KNOWN_TTL_MS });
+		return true;
+	} catch {
+		return null;
+	}
+}
+
+export const UNKNOWN_TICKER = 'symbol not found';
+
 async function describeFailure(res: Response): Promise<string> {
 	const pr = decodePaymentRequired(res.headers.get('PAYMENT-REQUIRED'));
 	if (res.status === 402) return `payment rejected: ${pr?.error ?? 'unknown reason'}`;
+	if (res.status === 404) return `${UNKNOWN_TICKER}. StockTwits does not list this ticker; do not retry, tell the user to check the symbol`;
 	if (res.status === 403) return `forbidden (the gateway only serves supported countries, or the method is not GET)`;
 	if (res.status === 429) return 'rate limited by StockTwits, try again shortly';
 	return `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`;

@@ -34,6 +34,7 @@
   .reveal:hover { color:var(--fg); background:var(--chip) }
   .hint { grid-column:2; margin:0; color:var(--muted); font-size:13px; line-height:1.4 }
   .hint.err { color:var(--err) }
+  #tickerhint { grid-column:1 }
   @media (max-width:560px) { .hint { grid-column:1 } }
   button { font:inherit; font-weight:600; padding:12px 18px; border:0; border-radius:10px; background:var(--accent); color:var(--accent-fg); cursor:pointer; transition:background .12s, transform .06s }
   button:hover:not(:disabled) { background:var(--accent-hover) }
@@ -66,6 +67,7 @@
   .dot.running { border-color:var(--warn); animation:pulse 1s infinite }
   .dot.done { border-color:var(--ok); background:var(--ok); color:#fff }
   .dot.error { border-color:var(--err); background:var(--err); color:#fff }
+  .dot.skipped { border-style:dashed }
   .dot.info { border-color:var(--accent); color:var(--accent); font-weight:700 }
   @keyframes pulse { 50% { opacity:.4 } }
   .step-title { font-weight:600 }
@@ -159,6 +161,7 @@
       <button type="button" class="reveal" id="reveal" aria-label="Show coupon code" aria-pressed="false">Show</button>
     </div>
     <button id="go" type="submit">Tell me a joke</button>
+    <p class="hint err hidden" id="tickerhint" aria-live="polite"></p>
     <p class="hint" id="pwhint" aria-live="polite">Optional. Without one, your agent pays 0.10 USDC via x402.</p>
   </form>
 
@@ -246,6 +249,9 @@
   });
   const setPwHint = (text, isError) => { pwhint.textContent = text; pwhint.classList.toggle('err', !!isError); password.classList.toggle('invalid', !!isError); };
   password.addEventListener('input', () => { if (pwhint.classList.contains('err')) setPwHint(PW_HINT, false); });
+  const tickerhint = $('#tickerhint');
+  function setTickerError(msg) { tickerhint.textContent = msg || ''; tickerhint.classList.toggle('hidden', !msg); ticker.classList.toggle('invalid', !!msg); ticker.setAttribute('aria-invalid', msg ? 'true' : 'false'); }
+  ticker.addEventListener('input', () => { if (!tickerhint.classList.contains('hidden')) setTickerError(''); });
 
   // ---- time helpers ----
   const relTime = (iso) => {
@@ -282,7 +288,7 @@
   // ---- under the hood: a human summary first, the raw JSON behind a disclosure ----
   const HOOD = {
     stocktwits: { title: 'Step 1 · StockTwits', what: 'GET /api/2/symbols/show/<TICKER>.json through Cloudflare\'s Monetization Gateway (0.001 USDC, x402 exact scheme, settled on Base), plus the free symbol stream for recent posts.' },
-    ceramic: { title: 'Step 2 · Ceramic search', what: 'Three keyword searches on POST https://api.ceramic.ai/search through the Monetization Gateway (0.001 USDC each, x402 exact). Ceramic is lexical with no date filter, so the app merges the results, drops listicles and quote pages, and ranks dated company news first.' },
+    ceramic: { title: 'Step 2 · Ceramic search', what: 'Three keyword searches on POST https://api.ceramic.ai/search through the Monetization Gateway (0.001 USDC each, x402 exact). Ceramic is lexical with no date filter and its index trails the news by months, so the app merges the results, drops listicles, quote pages, undated and older pieces, ranks what is left newest first, and tells both models how old the newest item is.' },
     joke: { title: 'Step 3 · AI Gateway', what: 'POST /ai/run on Cloudflare AI Gateway with Payment-Method: x402 (upto scheme: a ceiling is authorized, the real token cost is settled).' },
     turns: { title: 'Agent turns · AI Gateway', what: 'The orchestrator model itself runs through AI Gateway machine payments: every turn is an x402 authorization.' },
   };
@@ -308,6 +314,7 @@
       return dl([
         [qs.length > 1 ? 'Queries' : 'Query', qs.map(esc).join('<br>')],
         ['Kept', data.rawCount != null ? esc(`${rs.length} of ${data.rawCount} results${dropped ? ` (dropped: ${dropped})` : ''}`) : null],
+        ['Newest', data.newestDate ? esc(data.newestDate) : (data.results ? 'no item carries a full date' : null)],
       ]) + (rs.length ? `<ul>${rs.map((r) => `<li>${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}${r.source || r.date ? ` <span class="muted">· ${esc([r.source, r.date].filter(Boolean).join(' · '))}</span>` : ''}${r.description ? ` <span class="muted">· ${esc(r.description.slice(0, 140))}${r.description.length > 140 ? '…' : ''}</span>` : ''}</li>`).join('')}</ul>` : '<p>No results.</p>');
     }
     if (key === 'joke') {
@@ -399,8 +406,8 @@
     dot.dataset.state = state;
     if (state !== prev && (state === 'done' || state === 'error')) $('#live').textContent = `${dot.parentElement.querySelector('.step-title, .steptitle').textContent}: ${state === 'done' ? 'done' : 'failed'}${detail ? '. ' + detail : ''}`;
     dot.className = 'dot ' + state;
-    const word = { done: 'done', error: 'failed', running: 'in progress', info: 'not started' }[state] || 'pending';
-    dot.innerHTML = (state === 'done' ? '✓' : state === 'error' ? '!' : state === 'info' ? '$' : '') + `<span class="sr-only"> ${word}</span>`;
+    const word = { done: 'done', error: 'failed', running: 'in progress', info: 'not started', skipped: 'skipped' }[state] || 'pending';
+    dot.innerHTML = (state === 'done' ? '✓' : state === 'error' ? '!' : state === 'info' ? '$' : state === 'skipped' ? '–' : '') + `<span class="sr-only"> ${word}</span>`;
     if (detail !== undefined) dot.parentElement.querySelector('.step-detail').textContent = detail;
     if (receiptHtml !== undefined) dot.parentElement.querySelector('.receipt').innerHTML = receiptHtml;
   }
@@ -417,7 +424,7 @@
     for (const id of ['result', 'paywall', 'error', 'cachedwrap', 'paid']) show(id, false);
     $('#joke').textContent = ''; $('#based').textContent = ''; $('#paid').textContent = '';
     show('run', true); show('bar', true);
-    setPwHint(PW_HINT, false);
+    setPwHint(PW_HINT, false); setTickerError('');
   }
   function workingLine(turns) {
     const elapsed = runStarted ? mmss(Date.now() - runStarted) : '0:00';
@@ -459,13 +466,21 @@
       setStep('finished', 'running', workingLine(turns.length), turnsChip(turns));
       return false;
     }
-    for (const n of order) if (!states[n] || states[n] === 'pending') setStep(n, 'error', 'Skipped.', '');
+    for (const n of order) if (!states[n] || states[n] === 'pending') setStep(n, 'skipped', 'Skipped: the run stopped before this step.', '');
     const failed = st.outcome !== 'completed' ? (st.error || st.outcome) : null;
     const took = runStarted ? mmss(Date.now() - runStarted) : null;
-    setStep('finished', failed ? 'error' : 'done', failed ? 'Failed' : `${turns.length} paid model turns${took ? ` · finished in ${took}` : ''}`, turnsChip(turns));
+    setStep('finished', failed ? 'skipped' : 'done', failed ? `Stopped after ${turns.length} paid model turn${turns.length === 1 ? '' : 's'}${took ? ` (${took})` : ''}.` : `${turns.length} paid model turns${took ? ` · finished in ${took}` : ''}`, turnsChip(turns));
     show('bar', false);
     showResult(st, failed, turns.length, took);
     return true;
+  }
+  const STEP_LABEL = { fetch_stocktwits_signals: '1 (StockTwits)', search_stock_news: '2 (Ceramic news)', write_joke: '3 (AI Gateway joke)' };
+  function friendlyFailure(err, sym) {
+    const e = String(err);
+    if (/symbol not found|does not list the ticker|unknown ticker/i.test(e)) return `StockTwits does not list the ticker ${sym}. Check the symbol and try again.`;
+    if (/rate limited/i.test(e)) return 'StockTwits is rate limiting us right now. Try again in a minute.';
+    if (/payment rejected|402/i.test(e)) return `A payment was rejected: ${e}`;
+    return `The run stopped: ${e}`;
   }
   function showResult(st, failed, turnCount, took) {
     const sym = st.ticker || runSym;
@@ -474,11 +489,14 @@
     $('#r-when').innerHTML = timeEl(new Date().toISOString());
     $('#permalink').href = `/joke/${encodeURIComponent(st.id || runId)}`;
     if (st.joke) { $('#joke').textContent = st.joke; $('#based').textContent = st.facts?.length ? 'Based on: ' + st.facts.slice(0, 3).map(cleanFact).join(' · ') : (st.basedOn ? 'Based on: ' + st.basedOn : ''); }
-    if (failed) { $('#error').textContent = failed; show('error', true); }
+    if (failed) { $('#error').textContent = friendlyFailure(failed, sym); show('error', true); }
+    $('#another').textContent = failed ? 'Try another ticker' : 'Tell me another';
     const res = $('#result'); show('result', true); res.classList.remove('new'); void res.offsetWidth; res.classList.add('new');
     // Collapse the process to one line now that the joke is the point.
-    const doneSteps = ['fetch_stocktwits_signals', 'search_stock_news', 'write_joke'].filter((n) => dots[n].classList.contains('done')).length;
-    $('#summary-text').textContent = failed ? `Run failed after ${doneSteps} of 3 steps${took ? ` (${took})` : ''}.` : `${doneSteps} paid steps · ${turnCount} model turns${took ? ` · ${took}` : ''}`;
+    const order3 = ['fetch_stocktwits_signals', 'search_stock_news', 'write_joke'];
+    const doneSteps = order3.filter((n) => dots[n].classList.contains('done')).length;
+    const failedAt = STEP_LABEL[st.failedStep] || STEP_LABEL[order3.find((n) => dots[n].dataset.state === 'error')];
+    $('#summary-text').textContent = failed ? `Stopped at ${failedAt ? `step ${failedAt}` : `step ${doneSteps + 1}`}${took ? ` after ${took}` : ''}.` : `${doneSteps} paid steps · ${turnCount} model turns${took ? ` · ${took}` : ''}`;
     $('#run').classList.add('collapsed', 'done');
     res.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
@@ -540,6 +558,14 @@
         showPaywall(body, sym, res.status === 401 ? 'That coupon code is not valid. Check it and try again, or let your agent pay (see below).' : null);
         done(); return;
       }
+      if (res.status === 400) {
+        let body = {}; try { body = await res.json(); } catch {}
+        if (body.error === 'unknown_ticker' || body.error === 'bad_ticker') {
+          // Bounced before the agent started: nothing was paid, so no run card.
+          show('run', false); setTickerError(body.message || `StockTwits does not list the ticker ${sym}.`); ticker.select(); done(); return;
+        }
+        throw new Error(`POST 400: ${body.message || body.error || 'bad request'}`);
+      }
       if (!res.ok) throw new Error(`POST ${res.status}: ${(await res.text()).slice(0, 200)}`);
       id = (await res.json()).id; runId = id;
       if (!id) throw new Error('the server did not return a run id');
@@ -566,7 +592,7 @@
     if (!data || (Array.isArray(data) && !data.length)) {
       const state = dots[name]?.dataset.state || '';
       data = { note: key === 'turns' ? (state === 'running' ? 'No model turn has settled yet. This list fills in as the agent works.' : 'Model turns are tallied when the agent finishes.')
-        : state === 'running' ? 'This step is running. Its result appears here as soon as it returns.' : state === 'error' ? 'This step did not return a result.' : 'This step has not started yet.' };
+        : state === 'running' ? 'This step is running. Its result appears here as soon as it returns.' : state === 'error' ? `This step failed: ${dots[name].parentElement.querySelector('.step-detail').textContent}` : state === 'skipped' ? 'The run stopped before this step.' : 'This step has not started yet.' };
     }
     const links = runId ? `<a href="/joke/${runId}" target="_blank" rel="noopener">run status JSON</a> · <a href="/api/events?conversation=${runId}" target="_blank" rel="noopener">x402 gateway events</a>` : '';
     return { data, links };

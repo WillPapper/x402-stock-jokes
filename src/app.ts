@@ -13,6 +13,7 @@ import { config, paidInferenceFetch } from './lib/env.ts';
 import { ledger } from './lib/ledger.ts';
 import { listEvents, logEvent } from './lib/log.ts';
 import { PERMIT2, USDC_BASE, walletFromKey } from './lib/x402.ts';
+import { tickerKnown } from './tools/stocktwits.ts';
 
 // The agent's own model turns go through AI Gateway machine payments: every
 // chat-completions call pi-ai makes is rewritten to /ai/run and paid with x402.
@@ -54,6 +55,13 @@ app.use('/agents/joke/:id', async (c, next) => {
 		}
 		return c.json({ error: 'unauthorized', message: access.reason }, 401);
 	}
+	// Bounce tickers StockTwits does not list before the agent starts: the check
+	// is free, and every model turn after this point is paid.
+	const ticker = c.req.header('x-joke-ticker')?.toUpperCase() ?? (await tickerFromBody(c.req.raw));
+	if (ticker && (await tickerKnown(ticker)) === false) {
+		logEvent('gate', false, { probe: 'ticker', ticker }, { conversationId: id, label: 'unknown ticker' });
+		return c.json({ error: 'unknown_ticker', ticker, message: `StockTwits does not list the ticker ${ticker}. Check the symbol (for example NVDA, AAPL or BRK.B) and try again.` }, 400);
+	}
 	// The agent runs in a Durable Object (another isolate), so hand this over through D1.
 	await recordAccess(id, access.by, access.amount).catch((err) => console.warn('recordAccess failed', (err as Error).message));
 
@@ -90,7 +98,7 @@ app.post('/joke/:ticker', async (c) => {
 	if (!TICKER.test(ticker)) return c.json({ error: 'bad_ticker', message: 'ticker must be 1-12 letters, digits or dots' }, 400);
 	const id = jokeConversationId(ticker);
 	// Forward internally through the gated agent route so password/payment checks apply once.
-	const headers = new Headers({ 'content-type': 'application/json' });
+	const headers = new Headers({ 'content-type': 'application/json', 'x-joke-ticker': ticker });
 	for (const h of ['x-joke-password', 'payment-context']) {
 		const v = c.req.header(h);
 		if (v) headers.set(h, v);
@@ -117,6 +125,7 @@ async function statusFromDb(id: string) {
 	const payments: { label: string; authorizedUsdc: string | null; scheme: string | null; tx: string | null; ok: boolean; at: string }[] = [];
 	let turns = 0;
 	let lastFailure: { at: string; error: string } | null = null;
+	let lastToolError: { tool: string; error: string } | null = null;
 	let agentDone: { ok: boolean; reason?: string } | null = null;
 	let started = false;
 	for (const e of events) {
@@ -127,7 +136,10 @@ async function statusFromDb(id: string) {
 			const output = d.output as { payments?: unknown } | undefined;
 			steps[d.tool] = { state: 'done', output, receipts: output?.payments };
 		}
-		if (e.kind === 'tool.error' && typeof d.tool === 'string' && steps[d.tool]) steps[d.tool] = { state: 'error', detail: String(d.error ?? 'failed') };
+		if (e.kind === 'tool.error' && typeof d.tool === 'string' && steps[d.tool]) {
+			steps[d.tool] = { state: 'error', detail: String(d.error ?? 'failed') };
+			lastToolError = { tool: d.tool, error: String(d.error ?? 'failed').slice(0, 300) };
+		}
 		if (e.kind === 'x402.payment') {
 			const attempts = (d.attempts as { paymentResponse?: { transaction?: string } }[] | undefined) ?? [];
 			const tx = attempts.map((a) => a.paymentResponse?.transaction).find(Boolean) ?? null;
@@ -148,7 +160,8 @@ async function statusFromDb(id: string) {
 	} else if (agentDone && !agentDone.ok) {
 		done = true;
 		outcome = 'failed';
-		error = agentDone.reason ?? 'the agent finished without a joke';
+		// The step's own message ("symbol not found", "rate limited") beats "tool failures: <name>".
+		error = lastToolError?.error ?? agentDone.reason ?? 'the agent finished without a joke';
 	} else if (lastFailure && lastFailure.at === lastAt && idleMs > 45_000) {
 		done = true;
 		outcome = 'failed';
@@ -163,6 +176,7 @@ async function statusFromDb(id: string) {
 		done,
 		outcome,
 		error,
+		failedStep: done && outcome === 'failed' ? (lastToolError?.tool ?? null) : null,
 		joke: row?.joke ?? null,
 		basedOn: row ? row.facts.slice(0, 3).join('; ') : null,
 		facts: row?.facts ?? null,
@@ -299,7 +313,7 @@ app.get('/api/events', async (c) =>
 async function tickerFromBody(req: Request): Promise<string | null> {
 	try {
 		const body = (await req.clone().json()) as { body?: unknown };
-		const m = typeof body.body === 'string' ? body.body.toUpperCase().match(/\b[A-Z]{1,6}(?:\.[A-Z])?\b/g) : null;
+		const m = typeof body.body === 'string' ? body.body.toUpperCase().match(/\b[A-Z][A-Z0-9]{0,11}(?:\.[A-Z]{1,2})?\b/g) : null;
 		const stop = new Set(['A', 'I', 'ME', 'THE', 'JOKE', 'ABOUT', 'TELL', 'PLEASE', 'STOCK', 'FOR', 'ON', 'OF', 'AN', 'TO', 'AND', 'WRITE', 'MAKE', 'GIVE']);
 		return m?.find((t) => !stop.has(t)) ?? null;
 	} catch {

@@ -92,5 +92,6 @@ export function Joke({ id }: { id: string }) {
 		'Paid: <each payment from the tool results as "<label> <amount> USDC <basescan link if present>", then the total>',
 		'',
 		'If the user gives no ticker, ask for one. If a tool fails, say which step failed and why, and stop; never call the same tool more than twice in one reply; do not invent data. Never give financial advice.',
+		'If fetch_stocktwits_signals says the symbol was not found, the ticker does not exist: do not retry and do not try other tools; reply that the ticker is unknown and stop.',
 	].join('\n');
 }
