@@ -64,17 +64,27 @@ The gateway skill was last changed on 2026-04-19, so the per-request mode and th
 - **x402 credits:** same $0.45 per million CU, prepaid in $1 steps, held by the wallet. The gateway never sees our key, so the dashboard account gets no credit for these payments.
 - Search results describe paying an Alchemy invoice in crypto (US customers, manually each month). That support page returns `404` today, so it is unverified here.
 
-## Cost for this app
+## Credits vs. pay-per-request: why the app only buys credits
 
-| Call | Where | CU | PAYG or x402 credits | x402 without SIWE |
-|---|---|---|---|---|
-| `alchemy_getAssetTransfers` | `src/lib/transfers.ts`: 2 per refresh (out and in), plus 1 for each extra page of 1,000 transfers; cached 30 s per isolate | 120 | $0.000054 | $0.001 |
-| `eth_call` (`balanceOf`, `allowance`) | `src/app.ts` `/api/wallet`: Alchemy first, then public RPCs; not cached | 26 each | $0.0000117 | $0.001 |
+The gateway sells two ways. Signed in with SIWE, it sells **credits** in $1 top-ups, at $0.45 per million compute units (CU): you pay for what each call uses. Without a sign-in, it charges **$0.001 per request**, whatever the call. For the calls this app makes, per-request costs 18× to 222× more:
 
-CU figures are from [Compute Unit Costs](https://www.alchemy.com/docs/reference/compute-unit-costs).
+| Call | Where in the app | CU | Credits | Pay-per-request | Per-request costs |
+|---|---|---|---|---|---|
+| `alchemy_getAssetTransfers` | `src/lib/transfers.ts`: 2 per stats refresh (out and in), plus 1 per extra page of 1,000 transfers; cached 30 s per isolate | 120 | $0.000054 | $0.001 | 18.5× more |
+| `eth_call` (`balanceOf`, `allowance`) | `src/app.ts` `/api/wallet`: key first, then public RPCs (never the gateway); not cached | 26 | $0.0000117 | $0.001 | 85× more |
+| `eth_blockNumber` | `bun run doctor` and tests only | 10 | $0.0000045 | $0.001 | 222× more |
 
-- A stats refresh (2 transfer calls) costs 240 CU: $0.000108 on credits, versus $0.002 per request without SIWE. **Always sign in:** for this traffic, credits cost 18x less than per-request (85x less for `eth_call`).
-- $1 of credits buys about 9,200 stats refreshes. The free 30M CU buys about 125,000 a month. One isolate refreshing every 30 s for a whole month uses 20.7M CU. Several busy isolates could pass 30M; the dashboard's Usage tab shows the real figure.
+CU figures are from [Compute Unit Costs](https://www.alchemy.com/docs/reference/compute-unit-costs). Credits are the [Pay-As-You-Go rate](https://support.alchemy.com/articles/2300474614-understanding-alchemy-s-pay-as-you-go-billing-model), which is also what the gateway's credits quote states. The $0.001 comes from the gateway's own `402` quote.
+
+What that means for the stats page:
+
+| | Credits | Pay-per-request |
+|---|---|---|
+| One stats refresh (2 transfer calls) | $0.000108 | $0.002 |
+| Refreshes per $1 | about 9,250 | 500 |
+| One isolate refreshing every 30 s for a month (86,400 refreshes) | $9.33 | $172.80 |
+
+**So the app has no pay-per-request code.** It always signs in, so the gateway only ever offers it the credits quote, and it pays nothing but the exact $1 credits top-up. The free key costs nothing up to 30M CU a month, about 125,000 stats refreshes. One isolate refreshing every 30 s for a month uses 20.7M CU. Several busy isolates could pass 30M; the dashboard's Usage tab shows the real figure.
 
 ## The fallback in this app
 

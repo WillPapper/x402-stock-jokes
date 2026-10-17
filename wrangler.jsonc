@@ -18,7 +18,8 @@
 		// capacity, calls go to Alchemy's x402 gateway on the wallet's credits.
 		// "off": never pay, use only credits already on the wallet (since
 		// 2026-10-17: a $1 top-up was not credited, docs/alchemy-gateway-topup-not-credited.md).
-		// "credits": also buy $1 top-ups (at most one a day app-wide). Pay-per-request is never paid.
+		// "credits": also buy $1 top-ups (at most one a day app-wide). There is no
+		// pay-per-request mode: $0.001 a call is 18-222x the credits price (docs/alchemy-x402.md).
 		"ALCHEMY_GATEWAY_PAYMENTS": "off",
 		"MAX_USDC_PER_ALCHEMY_TOPUP": "1",
 		"MAX_USDC_ALCHEMY_PER_ISOLATE": "1",

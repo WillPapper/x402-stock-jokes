@@ -81,7 +81,7 @@ Spend caps and model choices are plain-text vars in `wrangler.jsonc`, enforced *
 | `MAX_USDC_PER_DATA_CALL` | `0.01` | cap per StockTwits or Ceramic payment (they quote 0.001) |
 | `MAX_USDC_PER_INFERENCE` | `0.25` | cap per AI Gateway authorization ceiling (Qwen quotes about 0.13) |
 | `MAX_USDC_PER_ISOLATE` | `5` | total one Worker isolate may authorize before it refuses |
-| `ALCHEMY_GATEWAY_PAYMENTS` | `off` | `off`: the Alchemy fallback uses only credits already on the wallet and never pays. `credits`: it may also buy a $1 top-up (at most one a day). Pay-per-request is never paid either way |
+| `ALCHEMY_GATEWAY_PAYMENTS` | `off` | `off`: the Alchemy fallback uses only credits already on the wallet and never pays. `credits`: it may also buy a $1 top-up (at most one a day). There is no pay-per-request mode: at $0.001 a call it costs 18× to 222× the credits price ([docs/alchemy-x402.md](docs/alchemy-x402.md)) |
 | `MAX_USDC_PER_ALCHEMY_TOPUP` | `1` | cap per Alchemy gateway credit top-up (quoted at exactly 1.00), used only when the free Alchemy key is out of capacity |
 | `MAX_USDC_ALCHEMY_PER_ISOLATE` | `1` | Alchemy top-ups one isolate may buy; app-wide the code also allows at most one per 24 h |
 
