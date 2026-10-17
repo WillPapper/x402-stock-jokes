@@ -19,7 +19,7 @@ export interface NewsItem {
 	title: string;
 	url: string;
 	source: string;
-	/** Publish date as YYYY-MM-DD or YYYY-MM when one was found in the URL or snippet; null otherwise. */
+	/** Publish date as YYYY-MM-DD, YYYY-MM or YYYY when one was found in the URL, snippet or title; null otherwise. */
 	date: string | null;
 	description: string;
 }
@@ -55,7 +55,9 @@ export function buildNewsQueries(company: string, symbol: string, now = new Date
 
 const LISTICLE = [
 	/\b(\d+|two|three|four|five|six|seven|eight|nine|ten)\s+(reasons?|stocks?|things|ways|picks|top|best|charts?|numbers)\b/i,
-	/\b(top|best)\s+\d*\s*(stocks?|picks|dividend|growth|ai)\b/i,
+	/\b(top|best)\b.{0,30}\b(stocks?|picks|etfs?|investments?)\b/i,
+	/\bhow to (buy|invest|trade)\b/i,
+	/\bwhat investors need to know\b|\bneed to know\b.{0,20}\binvestors\b/i,
 	/\b(should you|is it time to|time to|when to)\s+(buy|sell)\b/i,
 	/\bis\b.{0,50}\b(a buy|a sell|a good (buy|investment)|worth buying|the best)/i,
 	/\b(stocks?|shares) (to|you can|worth) (buy|watch|sell|avoid|own|hold)\b/i,
@@ -81,6 +83,7 @@ const INDEX_PAGE = [
 	/\b(buy|how to buy)\b.{0,20}\bstock\b.*\b(price|quote)\b/i,
 	/\b(annual report|10-k|10-q|8-k|form 4|statement of changes|proxy statement)\b/i,
 	/\bwikipedia\b|\boptions? etp\b|\bcfd\b/i,
+	/\b(news|headlines|updates) - [\w .&'’]+$/i,
 ];
 const JUNK_HOSTS = /(^|\.)(urlscan\.io|wikipedia\.org|defenseworld\.net|marketbeat\.com|simply-invest\.info|spreaker\.com|feedburner\.com)$/i;
 const INDEX_PATH = /\/(quote|quotes|symbol|symbols|stocks?|company|companies|news|forecasts?)\/[A-Za-z0-9.\-]+\/?$|\/(news|blog|feed)\/?$/i;
@@ -105,7 +108,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
  * "22 April 2026"). Returns YYYY-MM-DD, YYYY-MM, or null. Dates in the future
  * relative to `now` are ignored (they are usually fiscal-year labels).
  */
-export function detectDate(url: string, text: string, now = new Date()): string | null {
+export function detectDate(url: string, text: string, now = new Date(), title = ''): string | null {
 	const candidates: string[] = [];
 	const push = (y: number, m: number, d?: number) => {
 		if (y < 2000 || m < 1 || m > 12) return;
@@ -138,7 +141,12 @@ export function detectDate(url: string, text: string, now = new Date()): string 
 	for (const mm of t.matchAll(re2)) push(+mm[3]!, monthIndex(mm[2]!) + 1, +mm[1]!);
 	for (const mm of t.matchAll(re4)) push(+mm[1]!, +mm[2]!, +mm[3]!);
 	if (!candidates.length) for (const mm of t.matchAll(re3)) push(+mm[2]!, monthIndex(mm[1]!) + 1);
-	if (!candidates.length) return null;
+	if (!candidates.length) {
+		// Last resort: a bare year in the title ("2024 Disney Legends Award Honorees").
+		const y = /\b(20[0-3]\d)\b/.exec(title);
+		if (y && +y[1]! <= now.getUTCFullYear()) return y[1]!;
+		return null;
+	}
 	// Snippets often carry several dates (copyright lines, old references); the latest one is usually the dateline.
 	return candidates.sort().at(-1)!;
 }
@@ -156,6 +164,7 @@ function cleanSnippet(s: string, title: string): string {
 	let t = s.replace(/\s+/g, ' ').trim();
 	if (title && t.toLowerCase().startsWith(title.toLowerCase().slice(0, 30))) t = t.slice(title.length).trim();
 	t = t.replace(/^[\s|·\-–—:]+/, '');
+	if (/^(benzinga|skip to|home news|search|menu|sign in|log in|subscribe)\b/i.test(t) || /benzinga research my stocks/i.test(t)) return '';
 	return t.slice(0, 240);
 }
 
@@ -224,18 +233,20 @@ export function rankNews(raw: RawNews[], opts: { company: string; symbol: string
 			dropped.index++;
 			continue;
 		}
-		const date = detectDate(url, `${title} ${desc}`, now);
+		const date = detectDate(url, `${title} ${desc}`, now, title);
 		let ageDays: number | null = null;
 		if (date) {
 			const [y, m, d] = date.split('-').map(Number);
-			ageDays = (now.getTime() - Date.UTC(y!, m! - 1, d ?? 15)) / 86_400_000;
+			ageDays = (now.getTime() - Date.UTC(y!, (m ?? 7) - 1, d ?? 15)) / 86_400_000;
 		}
 		if (ageDays !== null && ageDays > 3 * 365) {
 			dropped.stale++;
 			continue;
 		}
 		let score = 0;
+		const yearOnly = date !== null && date.length === 4;
 		if (ageDays === null) score += 40;
+		else if (yearOnly) score += ageDays <= 400 ? 45 : 20; // a bare year is weak evidence: just above undated
 		else if (ageDays <= 31) score += 100;
 		else if (ageDays <= 120) score += 70;
 		else if (ageDays <= 400) score += 50;

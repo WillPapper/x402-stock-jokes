@@ -5,7 +5,7 @@ One joke per ticker, and every step of making it is an **x402 micro-payment in U
 ```
 "Tell me a joke about TSLA"
   → 1. StockTwits   GET symbols/show/TSLA (+ the free symbol stream)   0.001 USDC, exact
-  → 2. Ceramic      POST /search "Tesla TSLA stock news"              0.001 USDC, exact
+  → 2. Ceramic      POST /search ×3 keyword queries, ranked locally    0.003 USDC, exact
   → 3. AI Gateway   POST /ai/run google/gemma-4-26b-a4b-it            ≤ 0.026 USDC ceiling, upto
   and the agent's own turns on alibaba/qwen3.8-27b, also via AI Gateway x402 (≤ 0.13 USDC ceiling each)
 ```
@@ -212,7 +212,7 @@ src/cloudflare.ts              JokeRunner: us-jurisdiction Durable Object that s
 src/lib/log.ts                 structured events (Workers Logs + D1), upstream id extraction
 src/agents/joke.ts             Joke: the Flue agent, its model and tools, payment metadata on every reply, D1 write on finish
 src/tools/stocktwits.ts        step 1 (paid symbols/show + free stream → price, bull/bear counts, sample posts)
-src/tools/ceramic.ts           step 2 (paid search → headlines)
+src/tools/ceramic.ts           step 2 (three paid searches → ranked company news; ranking in src/lib/news.ts)
 src/tools/joke.ts              step 3 (paid /ai/run → the joke)
 src/lib/x402.ts                one x402 client (exact + upto), budget-guarded signer, receipt decoding
 src/lib/ai-gateway-provider.ts the agent's model, paid with x402 through AI Gateway
@@ -235,6 +235,8 @@ Cost per joke: 0.002 USDC for data plus about 0.014 USDC settled for inference (
 - **AI Gateway settles per call, on-chain, for the real token cost** (fractions of a cent, never the ceiling), but returns no `PAYMENT-RESPONSE` receipt. `/api/transfers` lists the settlements.
 - **Secrets are read lazily on purpose.** Workers validate the module at upload time before any secret exists, so nothing in `src/lib/` touches a secret at import. Keep it that way when adding code, or `wrangler deploy` fails with error 10021.
 - **Base RPC rate limits.** Public Base RPCs return 429 to Cloudflare's edge under light load; `/api/wallet` rotates through several and falls back to address-only. Set `BASE_RPC_URL` for the scripts if `mainnet.base.org` throttles you locally.
+- **Jokes come from news, not statistics.** Early jokes recited "14 bullish, 2 bearish of 30 posts, 565,947 on the watchlist". Now `write_joke` takes `news` (2 to 4 one-sentence company events), optional `chatter` (a trader quote or two) and `price`; the prompt (`src/lib/joke-prompt.ts`) builds the premise from the news and forbids counts, tallies and percentages. The StockTwits tool returns the mood in words and quotable posts first and parks the counts under `stats`.
+- **Ceramic is lexical and has no date filter.** One `"<TICKER> stock news"` query returns evergreen pages ("5 reasons to buy", quote pages, 2023 analyst round-ups); its index also trails the news by weeks. Following [Ceramic's best practices](https://docs.ceramic.ai/api/search/best-practices), step 2 runs three keyword queries (`<Company> <TICKER> stock news`, `<Company> stock <year>`, `<Company> announces OR unveils OR acquires …`), 20 results each, then `src/lib/news.ts` dedupes, drops listicles, recommendations, quote and filing pages, detects a publish date from the URL or snippet, and ranks dated company events first. Short tickers are kept out of two queries because `NET` matches `.NET` and `cloudflare.net`. The under-the-hood panel shows the queries and what was dropped.
 - **Reply format drift.** The orchestrator sometimes writes `Based:` instead of `Based on:`; the page accepts both. The D1 row uses the facts passed to `write_joke`, not the reply text.
 - **`cf workers secrets bulk` did not set secrets** in this session (it reported success, then `secrets list` was empty); see [docs/cf-secrets-bulk-bug.md](./docs/cf-secrets-bulk-bug.md). `wrangler secret bulk` works.
 - **`503 facilitator verify returned 403` / `403 disallowed visitor country`** were the visitor-identity check described above, not flakiness; the alarm-driven runner plus D1-served status fixes them. `write_joke` still retries once on a 5xx.

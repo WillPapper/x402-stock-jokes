@@ -36,6 +36,10 @@ describe('detectDate', () => {
 		expect(detectDate('https://x.test/a', 'Founded in 1975. © 2026 Benzinga. Posted April 26, 2023 6:34 AM', now)).toBe('2023-04-26');
 		expect(detectDate('https://x.test/a', "Microsoft's Blockbuster October 2025: Stock Soars", now)).toBe('2025-10');
 	});
+	test('falls back to a bare year in the title', () => {
+		expect(detectDate('https://x.test/a', 'D23 Announces 2024 Honorees', now, 'D23 Announces 2024 Honorees')).toBe('2024');
+		expect(detectDate('https://x.test/a', '© 2026 Benzinga', now, 'No year here')).toBeNull();
+	});
 	test('ignores future dates and returns null without one', () => {
 		expect(detectDate('https://x.test/a', 'Windows Server 2012 ESUs to October 2027', now)).toBeNull();
 		expect(detectDate('https://x.test/a', 'nothing here', now)).toBeNull();
@@ -54,6 +58,11 @@ describe('rankNews', () => {
 		{ title: 'AMD Radeon RX Vega Release Date & Update: Q2 2017 Launch', url: 'https://x.test/vega', description: 'by Guenee Simmons / May 14, 2017' },
 		{ title: 'rentals-sunset.rvtrader.com.cdn.cloudflare.net - urlscan.io', url: 'https://urlscan.io/domain/x', description: 'AMD' },
 		{ title: 'Nvidia Beats Estimates', url: 'https://x.test/nvda', description: 'Nvidia reported record revenue.' },
+		{ title: 'Top Media Stocks for 2026 and How to Invest | The Motley Fool', url: 'https://www.fool.com/investing/2026/02/10/top-media/', description: 'AMD' },
+		{ title: 'How to Buy AMD Stock', url: 'https://www.finder.com/x/buy-amd-stock', description: 'AMD' },
+		{ title: 'AMD Falls More Steeply Than Broader Market: What Investors Need to Know', url: 'https://finviz.com/news/x', description: 'AMD' },
+		{ title: 'AMD layoffs News - WDW News Today', url: 'https://x.test/tag/amd', description: 'AMD' },
+		{ title: 'D23 Announces Line Up of 2024 AMD Legends Award Honorees', url: 'https://x.test/d23', description: 'AMD honorees' },
 		{ title: 'AMD and OpenAI Announce Strategic Partnership to Deploy 6 Gigawatts of AMD GPUs', url: 'https://www.ir.amd.com/news-events/press-releases/detail/1260/x/', description: 'dup' },
 	];
 	const ranked = rankNews(raw, { company: 'Advanced Micro Devices', symbol: 'AMD', now, limit: 6 });
@@ -69,8 +78,9 @@ describe('rankNews', () => {
 		expect(titles).not.toMatch(/Stories, News/);
 		expect(titles).not.toMatch(/Accuracy Rate|Reasons Why|Insiders Are Selling|Going On With/);
 		expect(titles).not.toMatch(/urlscan|Nvidia Beats|Vega/);
-		expect(ranked.dropped.listicle).toBeGreaterThanOrEqual(4);
-		expect(ranked.dropped.index).toBeGreaterThanOrEqual(1);
+		expect(titles).not.toMatch(/Top Media|How to Buy|Need to Know|WDW News/);
+		expect(ranked.dropped.listicle).toBeGreaterThanOrEqual(7);
+		expect(ranked.dropped.index).toBeGreaterThanOrEqual(2);
 		expect(ranked.dropped.junk).toBe(1);
 		expect(ranked.dropped['off-topic']).toBe(1);
 		expect(ranked.dropped.stale).toBe(1);
