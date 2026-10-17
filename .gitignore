@@ -159,3 +159,6 @@ worker-configuration.d.ts
 
 # Cloudflare Access service token for the internal /api/events route (never commit)
 .access-service-token.json
+
+# macOS
+.DS_Store
