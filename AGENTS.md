@@ -18,7 +18,7 @@ This is a [Flue](https://flueframework.com) project: agents are TypeScript funct
 
 ## Commands
 
-- `bun run dev` — start the Worker (`vite dev`, :5173) and the page (`astro dev`, :4321, proxying the API to the Worker) together; needs `.dev.vars`, see README. `bun run dev:web` alone with `API_ORIGIN=https://jokes.papper.me` works on the page against production data.
+- `bun run dev` — start the Worker (`vite dev`, :5173) and the page (`astro dev`, :4321, proxying the API to the Worker) together; needs `.dev.vars`, see README. `bun run dev:web` alone with `API_ORIGIN=https://jokes.papper.me` works on the page against production data. The Astro commands run from inside `web/` (`cd web && astro dev`, as the scripts do): `astro dev --root web` from the repo root answers 404 for every path on Astro 7.
 - `bun run deploy` — build the Worker and the page, then deploy.
 - `bun run check:types` — typecheck the Worker and the page's scripts (the `<script>` blocks inside `.astro` files are not type-checked: `astro check` does not support TypeScript 7 yet); `bun test` — unit tests; `bun run check` — both, failing on either.
 - `bun run doctor` — check wallet, allowance and the live 402 quotes before spending.
