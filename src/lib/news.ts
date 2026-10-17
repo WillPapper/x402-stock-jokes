@@ -28,12 +28,22 @@ export type DropReason = 'duplicate' | 'listicle' | 'index' | 'junk' | 'off-topi
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 const CORPORATE_SUFFIX = /[,\s]+(inc|incorporated|corp|corporation|co|company|ltd|limited|plc|llc|holdings?|group|sa|nv|ag|se)\.?$/i;
+/** Share-class and depositary-receipt tags StockTwits appends: "Nintendo Co. Ltd - ADR", "Snowflake Inc, Class A". */
+const SHARE_CLASS = /[\s,-]+(adr|ads|class [a-c]|ordinary shares?|common stock)$/i;
 
-/** "Advanced Micro Devices Inc" → "Advanced Micro Devices"; "Walt Disney Co" → "Walt Disney". */
+/**
+ * "Advanced Micro Devices Inc" → "Advanced Micro Devices"; "Walt Disney Co" → "Walt Disney";
+ * "Nintendo Co. Ltd - ADR" → "Nintendo". The keyword is what Ceramic searches for, so a
+ * tag left on it ("Co. Ltd - ADR") turns three news queries into noise.
+ */
 export function companyKeyword(title: string | null | undefined, symbol: string): string {
 	let name = (title ?? '').trim();
-	for (let i = 0; i < 2 && CORPORATE_SUFFIX.test(name); i++) name = name.replace(CORPORATE_SUFFIX, '').trim();
-	name = name.replace(/[(),.]+$/g, '').trim();
+	for (let i = 0; i < 4; i++) {
+		const next = name.replace(SHARE_CLASS, '').replace(CORPORATE_SUFFIX, '').trim();
+		if (next === name) break;
+		name = next;
+	}
+	name = name.replace(/[(),.-]+$/g, '').trim();
 	return name || symbol;
 }
 

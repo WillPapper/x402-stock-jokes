@@ -178,3 +178,7 @@ Expected cost per joke: 0.002 (StockTwits) + 0.001 (Ceramic) + 3–4 orchestrato
 ## Listing fact (2026-10-17)
 
 StockTwits already reports the exchange a ticker trades on. `write_joke` now reads it from the StockTwits step and the prompt says "Listed: SPCX trades on NASDAQ today", with a rule that IPO or "still private" items are resolved history. This is why SPCX jokes framed the IPO as pending: Ceramic only indexes pre-IPO pages, and nothing told the joke model the company was public.
+
+## Status honesty and clean company names (2026-10-17)
+
+A Nintendo x402 run hit a five-minute AI Gateway 504 (7009) on the orchestrator turn. Flue retried and the joke landed two minutes later, but `/joke/<id>` had already said `failed` after 45 s of silence and the caller gave up. The poll status now reports `retrying` + `lastError` after a failed turn and only fails after 20 minutes without progress. Separately, "Nintendo Co. Ltd - ADR" was not reduced to "Nintendo", so the Ceramic queries were noise; `companyKeyword` now strips share-class tags and chained suffixes.

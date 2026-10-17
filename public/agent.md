@@ -35,7 +35,10 @@ header you get the `402` payment flow below.
    When `done` is `true` and `outcome` is `"completed"`, `joke` holds the joke,
    `basedOn` the facts it used, and `payments` the x402 payments the agent made
    on its side (StockTwits, Ceramic, Cloudflare AI Gateway) with Basescan links.
-   A joke takes 30 to 90 seconds.
+   A joke usually takes 1 to 3 minutes. Keep polling while `done` is `false`,
+   even when `retrying` is `true` and `lastError` names a failed model turn: the
+   runtime retries those and the joke normally still arrives. Only `done: true`
+   with `outcome: "failed"` means the run is over without a joke.
 
 ## The payment flow (handled automatically by an x402 client)
 

@@ -166,11 +166,16 @@ async function statusFromDb(id: string) {
 		outcome = 'failed';
 		// The step's own message ("symbol not found", "rate limited") beats "tool failures: <name>".
 		error = lastToolError?.error ?? agentDone.reason ?? 'the agent finished without a joke';
-	} else if (lastFailure && lastFailure.at === lastAt && idleMs > 45_000) {
+	} else if (lastFailure && lastFailure.at === lastAt && idleMs > 20 * 60_000) {
+		// A failed turn is not the end: Flue retries transient provider errors
+		// with a backoff (10 attempts, one hour). A Nintendo run was reported
+		// failed 45 s after an AI Gateway 504 and its joke arrived two minutes
+		// later, after the caller had given up. So a trailing failure only counts
+		// once nothing has happened for a long time; until then it is "retrying".
 		done = true;
 		outcome = 'failed';
 		error = lastFailure.error;
-	} else if (started && idleMs > 10 * 60_000) {
+	} else if (started && !lastFailure && idleMs > 10 * 60_000) {
 		done = true;
 		outcome = 'failed';
 		error = 'no progress for 10 minutes';
@@ -185,6 +190,9 @@ async function statusFromDb(id: string) {
 		done,
 		outcome,
 		error,
+		/** A model turn or tool failed and the runtime is retrying it; the run is still working. */
+		retrying: !done && lastFailure !== null && lastFailure.at === lastAt,
+		lastError: !done && lastFailure ? lastFailure.error : null,
 		failedStep: done && outcome === 'failed' ? (lastToolError?.tool ?? null) : null,
 		joke: row?.joke ?? null,
 		basedOn: row ? row.facts.slice(0, 3).join('; ') : null,

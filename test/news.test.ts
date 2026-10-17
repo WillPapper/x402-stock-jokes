@@ -7,7 +7,12 @@ describe('companyKeyword', () => {
 	test('strips corporate suffixes', () => {
 		expect(companyKeyword('Advanced Micro Devices Inc', 'AMD')).toBe('Advanced Micro Devices');
 		expect(companyKeyword('Walt Disney Co', 'DIS')).toBe('Walt Disney');
-		expect(companyKeyword('Snowflake Inc, Class A', 'SNOW')).toBe('Snowflake Inc, Class A');
+		expect(companyKeyword('Snowflake Inc, Class A', 'SNOW')).toBe('Snowflake');
+		expect(companyKeyword('Nintendo Co. Ltd - ADR', 'NTDOY')).toBe('Nintendo');
+		expect(companyKeyword('SK Hynix Inc - ADR', 'SKHY')).toBe('SK Hynix');
+		expect(companyKeyword('Oracle Corp.', 'ORCL')).toBe('Oracle');
+		expect(companyKeyword('AT&T Inc', 'T')).toBe('AT&T');
+		expect(companyKeyword('Vanguard Total Bond Market ETF', 'BND')).toBe('Vanguard Total Bond Market ETF');
 		expect(companyKeyword(null, 'NVDA')).toBe('NVDA');
 	});
 });
