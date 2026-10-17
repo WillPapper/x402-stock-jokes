@@ -44,8 +44,8 @@ export function Joke({ id }: { id: string }) {
 		return { payments, totalAuthorizedUsdc: totalAuthorizedUsdc(payments) };
 	});
 
-	// Close the run: the joke row was written by write_joke, so top it up with
-	// the closing turn's payments and the step archive; without a joke, record why.
+	// Close the run: the joke row was written by write_joke (which also ended the
+	// turn), so top it up with the step archive; without a joke, record why.
 	useAgentFinish(async ({ log, response }) => {
 		const failedTools = response.toolCalls.filter((t) => t.isError).map((t) => t.tool);
 		if (failedTools.length) logEvent('error', false, { where: 'agent-finish', failedTools, toolCalls: response.toolCalls.length }, { conversationId: id, label: 'tool failures' });
@@ -76,12 +76,7 @@ export function Joke({ id }: { id: string }) {
 		'2. search_stock_news with the ticker and that title. It returns company news items, newest first, each with a date, title and source.',
 		'3. write_joke immediately, without deliberating: news = the first 2 or 3 items as "<date>: <title>", the date copied exactly as the tool printed it (trim the title to the event itself, drop site names and tickers from it); chatter = one quote from step 1 only if it is obviously funny, otherwise none; price = latestPrice. Skip an item only if it is a buying recommendation or a listicle.',
 		'Never pass or mention watchlist counts, bullish or bearish tallies, sentiment or volume changes: they do not make jokes. If step 2 finds no usable news, pass the chatter and price alone.',
-		'Do not reply to the user until write_joke has returned a joke. Writing a joke without calling write_joke is a failure.',
-		'',
-		'Then reply in exactly this shape and nothing else:',
-		'<the joke text from write_joke, verbatim>',
-		'Based on: <2 or 3 of the news items you passed to write_joke, each with its source>',
-		'Paid: <each payment from the tool results as "<label> <amount> USDC <basescan link if present>", then the total>',
+		'Writing a joke without calling write_joke is a failure. A successful write_joke ends the conversation: its result is delivered to the user as-is, and you get no further turn.',
 		'',
 		'If the user gives no ticker, ask for one. If a tool fails, say which step failed and why, and stop; never call the same tool more than twice in one reply; do not invent data. Never give financial advice.',
 		'If fetch_stocktwits_signals says the symbol was not found, the ticker does not exist: do not retry and do not try other tools; reply that the ticker is unknown and stop.',

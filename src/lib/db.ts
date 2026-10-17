@@ -85,7 +85,7 @@ export async function insertJoke(row: Omit<JokeRow, 'id' | 'createdAt' | 'settle
 	return full;
 }
 
-/** Finish a row written by write_joke: the agent's closing turn adds its own payments and the full step archive. */
+/** Finish a row written by write_joke: the finish hook adds the full step archive and any late payments. */
 export async function completeJoke(conversationId: string, patch: { payments: PaymentRecord[]; totalAuthorizedUsdc: string; steps: Record<string, unknown> | null }): Promise<boolean> {
 	const res = await db()
 		.prepare('UPDATE jokes SET payments = ?2, total_authorized_usdc = ?3, steps = COALESCE(?4, steps) WHERE conversation_id = ?1')

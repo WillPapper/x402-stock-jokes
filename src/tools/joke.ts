@@ -101,13 +101,15 @@ export const writeJoke = (conversationId: string) =>
 				const result = await step.do(`joke:${symbol}`, () => writeJokeFor(input, config.jokeModel, conversationId));
 				await setStep(conversationId, 'write_joke', 'done', { output: { ...result, input: data, facts, promptFacts: facts } });
 				log.info(`Joke from ${result.model}: ${result.joke.slice(0, 80)}…`);
-				// Store the joke now. The agent's closing turn only formats a reply, and
-				// if that turn fails (AI Gateway 504 after five minutes has happened) the
-				// paid-for joke must not vanish with it; the finish hook tops the row up.
+				// Store the joke now: the run's result is this row, not a model reply.
+				// The finish hook tops it up with the archive and marks the run done.
 				const stored = await persistJoke(conversationId).catch((err) => ({ outcome: 'none' as const, reason: `store failed: ${(err as Error).message.slice(0, 300)}` }));
 				if (stored.outcome === 'none') logEvent('error', false, { where: 'write_joke', error: stored.reason }, { conversationId, label: 'store joke' });
 				logEvent('tool.done', true, { tool: 'write_joke', model: result.model, stored: stored.outcome, payments: result.payments.length }, { conversationId, label: 'write_joke' });
-				return { output: asJson({ ...result, facts }) };
+				// End the agent's turn here. Nothing reads the orchestrator's closing reply
+				// (status, feed and permalink come from D1), and that reply was one more
+				// paid model turn, the slowest of the run and the one that could still fail.
+				return { output: asJson({ ...result, facts }), terminate: true };
 			} catch (err) {
 				const error = (err as Error).message.slice(0, 400);
 				logEvent('tool.error', false, { tool: 'write_joke', error }, { conversationId, label: 'write_joke' });

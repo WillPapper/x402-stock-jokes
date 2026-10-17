@@ -1,9 +1,9 @@
 /**
  * Storing a finished joke in D1 from the run's own records. Called twice per
- * run: by `write_joke` as soon as the joke exists (the agent's closing turn can
- * still fail, and the paid-for joke must not vanish with it) and by the finish
- * hook, which tops the row up with the closing turn's payments. Both go
- * through the same path, so a Durable Object restart in between changes nothing.
+ * run: by `write_joke` as soon as the joke exists (the tool then ends the agent's
+ * turn) and by the finish hook, which tops the row up with the full step archive
+ * and any payment that landed after the insert. Both go through the same path,
+ * so a Durable Object restart in between changes nothing.
  */
 import { completeJoke, insertJoke, jokeForConversation } from './db.ts';
 import { config } from './env.ts';
