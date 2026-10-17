@@ -174,3 +174,7 @@ Expected cost per joke: 0.002 (StockTwits) + 0.001 (Ceramic) + 3–4 orchestrato
 - **Ceramic cannot be made fresher.** Probed `freshness`, `recency`, `startPublishedDate`, `dateRestrict` and `site:` queries: the first three return 422 `unsupported_parameter`; `site:fool.com` returns 2014 to 2025 pages; "Nike October 2026" matches Red October sneakers. Across 18 archived runs the newest dated item was 2 to 13 months old. A free RSS feed was considered and rejected: the demo is x402 end to end.
 - **So the pipeline is honest about age instead.** `rankNews` drops items older than 18 months, and whenever a dated item survives it also drops undated items and anything 9 months older than the newest. `search_stock_news` returns `newestDate` and a note like "newest item is from 2026-04-17, about 6 months ago; treat these as past events". The joke prompt gets today's date and may not frame old items as pending or current (a SpaceX joke had the IPO "getting close" six months after it happened).
 
+
+## Listing fact (2026-10-17)
+
+StockTwits already reports the exchange a ticker trades on. `write_joke` now reads it from the StockTwits step and the prompt says "Listed: SPCX trades on NASDAQ today", with a rule that IPO or "still private" items are resolved history. This is why SPCX jokes framed the IPO as pending: Ceramic only indexes pre-IPO pages, and nothing told the joke model the company was public.
