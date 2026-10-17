@@ -5,6 +5,7 @@ import { createPublicClient, erc20Abi, fallback, formatUnits, http } from 'viem'
 import { base } from 'viem/chains';
 import { Joke } from './agents/joke.ts';
 import { PRICE_USDC, checkAccess, paymentRequiredBody } from './lib/access.ts';
+import { jokeConversationId } from './lib/ids.ts';
 import { createX402AiGatewayProvider } from './lib/ai-gateway-provider.ts';
 import { jokeForConversation, jokeStats, latestJokeFor, listJokes, recordAccess, type JokeRow } from './lib/db.ts';
 import { amountsByHash, summarize, walletTransfers, type Transfer } from './lib/transfers.ts';
@@ -74,10 +75,10 @@ app.use('/agents/joke/:id', async (c, next) => {
 
 // Talk to Joke with one POST per message, then GET the same URL to read:
 //
-//   curl -X POST https://jokes.papper.me/agents/joke/demo-1 \
+//   curl -X POST https://jokes.papper.me/agents/joke/test-demo-1 \
 //     -H 'content-type: application/json' -H 'x-joke-password: …' \
 //     -d '{"kind":"user","body":"Tell me a joke about NVDA."}'
-//   curl https://jokes.papper.me/agents/joke/demo-1
+//   curl https://jokes.papper.me/agents/joke/test-demo-1
 app.route('/agents/joke', createAgentRouter(Joke));
 
 app.get('/api/health', (c) => c.json({ ok: true, price: `${PRICE_USDC} USDC` }));
@@ -87,7 +88,7 @@ const TICKER = /^[A-Z0-9.]{1,12}$/;
 app.post('/joke/:ticker', async (c) => {
 	const ticker = c.req.param('ticker').toUpperCase();
 	if (!TICKER.test(ticker)) return c.json({ error: 'bad_ticker', message: 'ticker must be 1-12 letters, digits or dots' }, 400);
-	const id = `j-${ticker.toLowerCase()}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+	const id = jokeConversationId(ticker);
 	// Forward internally through the gated agent route so password/payment checks apply once.
 	const headers = new Headers({ 'content-type': 'application/json' });
 	for (const h of ['x-joke-password', 'payment-context']) {

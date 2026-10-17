@@ -169,11 +169,14 @@ bun run dev       # http://localhost:5173
 Open the page, type a ticker and the password, watch the three steps pay and complete. Or use the agent API directly:
 
 ```sh
-curl -X POST http://localhost:5173/agents/joke/demo-1 \
+curl -X POST http://localhost:5173/joke/NVDA -H 'x-joke-password: <JOKE_PASSWORD>'   # names the run j-nvda-<time>-<rand>
+
+# or name the run yourself (use a test- prefix for hand runs so they are easy to spot):
+curl -X POST http://localhost:5173/agents/joke/test-demo-1 \
   -H 'content-type: application/json' -H 'x-joke-password: <JOKE_PASSWORD>' \
   -d '{"kind":"user","body":"Tell me a joke about NVDA."}'
 
-curl http://localhost:5173/joke/demo-1                  # status from D1: steps with outputs, payments, joke
+curl http://localhost:5173/joke/test-demo-1             # status from D1: steps with outputs, payments, joke
 curl http://localhost:5173/api/jokes?limit=10           # feed, newest first (add &after=<iso> for updates)
 curl 'http://localhost:5173/api/jokes/latest?ticker=NVDA'
 curl http://localhost:5173/api/stats                    # count, tickers, USDC authorized, per-hour buckets
@@ -244,6 +247,7 @@ Cost per joke: 0.002 USDC for data plus about 0.014 USDC settled for inference (
 - **Only `write_joke` may produce the joke.** The agent is told it cannot write jokes itself and may call a tool at most twice per reply; an earlier version retried a failing joke call seven times.
 - **Only one hostname.** Adding the custom domain turned off the `workers.dev` route (requests there get Cloudflare error 1042). Everything, including the password path, goes through `jokes.papper.me`.
 - **Admission is recorded in D1**, not in memory: the HTTP gate and the agent's Durable Object are different isolates, so `access` rows carry `paid_by` across.
+- **Conversation IDs are names, not proof.** Runs the app starts (the page, `POST /joke/<ticker>`) are named `j-<ticker>-<ms base36>-<rand4>` by `src/lib/ids.ts`, so they read well and sort by time. Anyone may POST `/agents/joke/<any id>`, so a prefix says nothing about who paid; paid versus coupon is always the gate's verdict in `access.paid_by` (joined into `jokes.paid_by`). Hand-run tests use a `test-` prefix by convention. Older rows carry `web-<hex>` (the page used to mint its own) and ad-hoc names from the first day; nothing parses the ID, so they were left alone.
 - **Renaming the agent** renames its Durable Object class; `wrangler.jsonc` carries a `renamed_classes` migration (`FlueStockJokeAgent` → `FlueJokeAgent`) so existing conversations survive.
 
 ## Caveats
