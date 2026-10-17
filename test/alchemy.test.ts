@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { verifyMessage } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { ALCHEMY_GATEWAY, KEY_PAUSE_MS, capacityLimit, createAlchemyRpc, signGatewaySiwe } from '../src/lib/alchemy.ts';
+import { ALCHEMY_GATEWAY, KEY_PAUSE_MS, capacityLimit, createAlchemyRpc, signGatewaySiwe, topUpRefusal } from '../src/lib/alchemy.ts';
 
 const MONTHLY = JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32600, message: 'Monthly capacity limit exceeded.' } });
 const THROUGHPUT = JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: 429, message: 'Your app has exceeded its compute units per second capacity.' } });
@@ -38,14 +38,16 @@ describe('signGatewaySiwe', () => {
 	});
 });
 
-const PAYMENT_REQUIRED = () => new Response(JSON.stringify({ x402Version: 2, error: 'Payment Required', accepts: [] }), { status: 402 });
+const quote = (amount: string) => ({ x402Version: 2, error: 'Payment Required', accepts: [{ scheme: 'exact', network: 'eip155:8453', amount }] });
+const PAYMENT_REQUIRED = (amount = '1000000') => () =>
+	new Response(JSON.stringify(quote(amount)), { status: 402, headers: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(quote(amount))) } });
 
 /**
  * A fake Alchemy: the key endpoint answers from `keyResponses`; the gateway
  * answers 402 until the wallet has paid once (`credits` false), then 200,
  * unless `gatewayResponses` scripts its unpaid answers.
  */
-function harness(opts: { key?: string | null; keyResponses?: (() => Response)[]; gatewayResponses?: (() => Response)[]; credits?: boolean; paidResponse?: () => Response; refuseTopUp?: () => Promise<string | null> } = {}) {
+function harness(opts: { key?: string | null; keyResponses?: (() => Response)[]; gatewayResponses?: (() => Response)[]; credits?: boolean; paidResponse?: () => Response; refuseTopUp?: (quote: { amount: string | null }) => Promise<string | null> } = {}) {
 	const account = privateKeyToAccount(generatePrivateKey());
 	let clock = Date.parse('2026-10-16T12:00:00Z');
 	let credits = opts.credits ?? true;
@@ -62,7 +64,7 @@ function harness(opts: { key?: string | null; keyResponses?: (() => Response)[];
 			if (url.startsWith(ALCHEMY_GATEWAY)) {
 				await new Promise((r) => setTimeout(r, 2));
 				gatewayCalls.push({ paid: false, auth: new Headers(init?.headers).get('authorization'), body: String(init?.body) });
-				return (gatewayResponses.shift() ?? (() => (credits ? ok('0xgateway') : PAYMENT_REQUIRED())))();
+				return (gatewayResponses.shift() ?? (credits ? () => ok('0xgateway') : PAYMENT_REQUIRED()))();
 			}
 			keyCalls.push(url);
 			return (keyResponses.shift() ?? (() => ok('0xkey')))();
@@ -73,7 +75,7 @@ function harness(opts: { key?: string | null; keyResponses?: (() => Response)[];
 			credits = true;
 			return (opts.paidResponse ?? (() => ok('0xpaid')))();
 		},
-		refuseTopUp: opts.refuseTopUp,
+		refuseTopUp: opts.refuseTopUp ?? (async () => null),
 		now: () => clock,
 		onFallback: (reason) => fallbacks.push(reason),
 	});
@@ -153,10 +155,12 @@ describe('createAlchemyRpc', () => {
 		expect(h.gatewayCalls.filter((c) => c.paid)).toHaveLength(1);
 	});
 
-	test('a refused top-up fails the call without paying', async () => {
-		const h = harness({ key: null, credits: false, refuseTopUp: async () => 'bought one 3 h ago' });
-		await expect(h.rpc('eth_blockNumber', [])).rejects.toThrow('needs a credit top-up, refused: bought one 3 h ago');
+	test('a refused top-up fails the call without paying, and the hook sees the quoted amount', async () => {
+		const seen: (string | null)[] = [];
+		const h = harness({ key: null, credits: false, refuseTopUp: async ({ amount }) => (seen.push(amount), 'payments are off') });
+		await expect(h.rpc('eth_blockNumber', [])).rejects.toThrow('needs a credit top-up, refused: payments are off');
 		expect(h.gatewayCalls.filter((c) => c.paid)).toHaveLength(0);
+		expect(seen).toEqual(['1000000']);
 	});
 
 	test('a failure after paying surfaces as an error (seen live: 500 right after a settled top-up)', async () => {
@@ -165,7 +169,25 @@ describe('createAlchemyRpc', () => {
 	});
 
 	test('an unpaid answer after the payment step surfaces as an error', async () => {
-		const h = harness({ key: null, credits: false, paidResponse: PAYMENT_REQUIRED });
+		const h = harness({ key: null, credits: false, paidResponse: PAYMENT_REQUIRED() });
 		await expect(h.rpc('eth_blockNumber', [])).rejects.toThrow('Alchemy (gateway): HTTP 402: Payment Required');
+	});
+});
+
+describe('topUpRefusal', () => {
+	const never = async () => {
+		throw new Error('the D1 lookup should not run');
+	};
+	test('payments off: refused, without even looking up the last top-up', async () => {
+		expect(await topUpRefusal({ payments: 'off', amount: '1000000', lastTopUpAt: never })).toContain('payments are off');
+	});
+	test('pay-per-request quotes are never paid, even with payments on', async () => {
+		expect(await topUpRefusal({ payments: 'credits', amount: '1000', lastTopUpAt: never })).toContain('pay-per-request is never paid');
+		expect(await topUpRefusal({ payments: 'credits', amount: null, lastTopUpAt: never })).toContain('pay-per-request is never paid');
+		expect(await topUpRefusal({ payments: 'credits', amount: '2000000', lastTopUpAt: never })).toContain('not the $1 credits top-up');
+	});
+	test('payments on: one $1 top-up per window', async () => {
+		expect(await topUpRefusal({ payments: 'credits', amount: '1000000', lastTopUpAt: async () => null })).toBeNull();
+		expect(await topUpRefusal({ payments: 'credits', amount: '1000000', lastTopUpAt: async () => '2026-10-17T05:29:13Z' })).toContain('already bought credits');
 	});
 });

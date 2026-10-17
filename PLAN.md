@@ -190,3 +190,5 @@ Alchemy calls (`/api/stats` transfer history) now survive the free plan running 
 ## Step archive from events (2026-10-17)
 
 The same Nintendo run lost its StockTwits and Ceramic step outputs: they lived in the in-memory hand-off, the deploy at 05:26:51 UTC restarted the Durable Object, and Flue resumed from durable records without re-running those tools. The page showed "not archived". `archivedSteps()` now merges the hand-off with the `tool.done` events before `insertJoke`/`completeJoke`.
+
+**Alchemy payments off (2026-10-17).** After the uncredited $1 top-up (and paid per-request calls that got 500s), `ALCHEMY_GATEWAY_PAYMENTS` is `off` in `wrangler.jsonc`. The fallback still tries the gateway unpaid, so credits Alchemy restores to the wallet get used, but a 402 now fails the call instead of paying. The wiring stays; set `credits` to buy $1 top-ups again once the gateway bug is fixed. Pay-per-request quotes ($0.001) are refused even with payments on, and `refuseTopUp` is a required hook, so leaving it out can't mean "pay".

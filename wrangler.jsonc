@@ -15,8 +15,11 @@
 		"MAX_USDC_PER_INFERENCE": "0.25",
 		"MAX_USDC_PER_ISOLATE": "5",
 		// Alchemy fallback (src/lib/alchemy.ts): when the free-plan key is out of
-		// capacity, the app wallet buys gateway credits, sold in $1 top-ups (and
-		// at most one top-up a day app-wide, enforced in code).
+		// capacity, calls go to Alchemy's x402 gateway on the wallet's credits.
+		// "off": never pay, use only credits already on the wallet (since
+		// 2026-10-17: a $1 top-up was not credited, docs/alchemy-gateway-topup-not-credited.md).
+		// "credits": also buy $1 top-ups (at most one a day app-wide). Pay-per-request is never paid.
+		"ALCHEMY_GATEWAY_PAYMENTS": "off",
 		"MAX_USDC_PER_ALCHEMY_TOPUP": "1",
 		"MAX_USDC_ALCHEMY_PER_ISOLATE": "1",
 		"RUNNER_LOCATION_HINT": "wnam",

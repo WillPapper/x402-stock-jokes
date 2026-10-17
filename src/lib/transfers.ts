@@ -5,7 +5,7 @@
  * Calls use the free-plan key and fall back to Alchemy's paid x402 gateway
  * when the key is out of capacity (alchemy.ts).
  */
-import { ALCHEMY_GATEWAY_PAYEE, TOPUP_MIN_INTERVAL_MS, createAlchemyRpc } from './alchemy.ts';
+import { ALCHEMY_GATEWAY_PAYEE, TOPUP_MIN_INTERVAL_MS, createAlchemyRpc, topUpRefusal } from './alchemy.ts';
 import { config, paidAlchemyFetch } from './env.ts';
 import { lastEventAt, logEvent, logEventDurably } from './log.ts';
 import { USDC_BASE, walletFromKey } from './x402.ts';
@@ -49,11 +49,19 @@ const alchemy = createAlchemyRpc({
 	key: () => config.alchemyKey,
 	signer: () => walletFromKey(config.privateKey),
 	paidFetch: () => (gatewayFetch ??= paidAlchemyFetch('Alchemy gateway credits')),
-	// One top-up per window across all isolates: claim it in D1 before paying.
-	refuseTopUp: async () => {
-		const last = await lastEventAt('alchemy.topup', new Date(Date.now() - TOPUP_MIN_INTERVAL_MS).toISOString());
-		if (last) return `the app already bought credits at ${last}; at most one top-up per ${TOPUP_MIN_INTERVAL_MS / 3_600_000} h`;
-		await logEventDurably('alchemy.topup', true, { wallet: walletFromKey(config.privateKey).address }, { label: 'Alchemy gateway credits' });
+	// Payments off unless ALCHEMY_GATEWAY_PAYMENTS=credits; never pay-per-request; one
+	// top-up per window across all isolates, claimed in D1 before paying.
+	refuseTopUp: async ({ amount }) => {
+		const refused = await topUpRefusal({
+			payments: config.alchemyGatewayPayments,
+			amount,
+			lastTopUpAt: () => lastEventAt('alchemy.topup', new Date(Date.now() - TOPUP_MIN_INTERVAL_MS).toISOString()),
+		});
+		if (refused) {
+			logEvent('alchemy.fallback', false, { refusedTopUp: refused, amount }, { label: 'Alchemy gateway' });
+			return refused;
+		}
+		await logEventDurably('alchemy.topup', true, { wallet: walletFromKey(config.privateKey).address, amount }, { label: 'Alchemy gateway credits' });
 		return null;
 	},
 	onFallback: (reason, detail) => logEvent('alchemy.fallback', true, { reason, detail }, { label: 'Alchemy gateway' }),

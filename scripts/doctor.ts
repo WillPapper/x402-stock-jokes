@@ -54,7 +54,8 @@ await quote('Ceramic search', 'https://api.ceramic.ai/search', {
 	body: JSON.stringify({ query: 'doctor' }),
 });
 
-// Alchemy: the free-plan key first, then the paid gateway it falls back to (src/lib/alchemy.ts).
+// Alchemy: the free-plan key first, then the x402 gateway it falls back to (src/lib/alchemy.ts).
+const gatewayPayments = vars.ALCHEMY_GATEWAY_PAYMENTS === 'credits' ? 'credits' : 'off';
 const rpcPing = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] });
 const alchemyKey = process.env.ALCHEMY_API_KEY;
 if (alchemyKey) {
@@ -62,14 +63,16 @@ if (alchemyKey) {
 	const text = await res.text();
 	const limit = capacityLimit(res.status, text);
 	if (res.ok && !limit) ok('Alchemy key: working');
-	else if (limit) console.log(`! Alchemy key: out of ${limit} capacity, calls will use the paid gateway`);
+	else if (limit) console.log(`! Alchemy key: out of ${limit} capacity, calls will use the gateway`);
 	else bad(`Alchemy key: HTTP ${res.status} ${text.slice(0, 120)}`);
-} else console.log('! ALCHEMY_API_KEY not set: every Alchemy call will use the paid gateway');
+} else console.log('! ALCHEMY_API_KEY not set: every Alchemy call will use the gateway');
 const { token: siwe } = await signGatewaySiwe(account);
 const gateway = await fetch(`${ALCHEMY_GATEWAY}/base-mainnet/v2`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `SIWE ${siwe}` }, body: rpcPing });
 const gatewayQuote = decodePaymentRequired(gateway.headers.get('PAYMENT-REQUIRED'))?.accepts?.[0];
-if (gateway.ok) ok('Alchemy gateway fallback: the wallet has credits');
-else if (gateway.status === 402 && gatewayQuote) ok(`Alchemy gateway fallback: no credits yet; the first fallback buys ${formatUsdc(BigInt(gatewayQuote.amount))} USDC of credits`);
+const topUps = gatewayPayments === 'credits' ? 'top-ups ON (at most one a day)' : 'top-ups OFF (ALCHEMY_GATEWAY_PAYMENTS)';
+if (gateway.ok) ok(`Alchemy gateway fallback: the wallet has credits; ${topUps}`);
+else if (gateway.status === 402 && gatewayQuote)
+	console.log(`! Alchemy gateway fallback: no credits on the wallet (quote ${formatUsdc(BigInt(gatewayQuote.amount))} USDC); ${topUps}${gatewayPayments === 'off' ? ', so the fallback will fail rather than pay' : ''}`);
 else bad(`Alchemy gateway fallback: HTTP ${gateway.status}`);
 
 const accountId = requireEnv('CLOUDFLARE_ACCOUNT_ID');

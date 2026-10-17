@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import type { GatewayPayments } from './alchemy.ts';
 import { Budget, usdToBaseUnits } from './budget.ts';
 import { createPaidFetch } from './x402.ts';
 import { ledger } from './ledger.ts';
@@ -14,6 +15,7 @@ interface Bindings {
 	MAX_USDC_PER_ISOLATE?: string;
 	MAX_USDC_PER_ALCHEMY_TOPUP?: string;
 	MAX_USDC_ALCHEMY_PER_ISOLATE?: string;
+	ALCHEMY_GATEWAY_PAYMENTS?: string;
 	ORCHESTRATOR_MODEL?: string;
 	JOKE_MODEL?: string;
 	ALCHEMY_API_KEY?: string;
@@ -62,6 +64,10 @@ export const config = {
 	},
 	get maxUsdAlchemyPerIsolate() {
 		return e.MAX_USDC_ALCHEMY_PER_ISOLATE ?? '1';
+	},
+	/** Fails closed: only the exact value "credits" lets the Alchemy fallback buy credits. */
+	get alchemyGatewayPayments(): GatewayPayments {
+		return e.ALCHEMY_GATEWAY_PAYMENTS === 'credits' ? 'credits' : 'off';
 	},
 	get runnerLocationHint(): DurableObjectLocationHint {
 		return (e.RUNNER_LOCATION_HINT ?? 'wnam') as DurableObjectLocationHint;

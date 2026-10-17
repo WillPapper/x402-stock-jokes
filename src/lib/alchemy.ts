@@ -11,6 +11,7 @@
  * Worker wiring lives in transfers.ts.
  */
 import { createSiweMessage, generateSiweNonce } from 'viem/siwe';
+import { decodePaymentRequired } from './x402.ts';
 
 export const ALCHEMY_GATEWAY = 'https://x402.alchemy.com';
 /** Payee of the gateway's Base quotes (live 402s, 2026-10-16). Lowercase, to match transfer counterparties. */
@@ -22,6 +23,28 @@ export const ALCHEMY_GATEWAY_PAYEE = '0x0573c4da7fc31e944e5ff959fef3b42199c308b2
  * 500 / 403 / another 402 for the same wallet; this caps what that can cost.
  */
 export const TOPUP_MIN_INTERVAL_MS = 24 * 60 * 60_000;
+/** The only quote ever paid: the $1 credits top-up offered to a signed-in wallet (1.00 USDC). */
+export const CREDITS_TOPUP_AMOUNT = '1000000';
+
+/**
+ * Whether the gateway may be paid at all (`ALCHEMY_GATEWAY_PAYMENTS`). Anything
+ * but "credits" means off: the fallback then uses credits already on the wallet
+ * and fails rather than pay. Off since 2026-10-17 (docs/alchemy-gateway-topup-not-credited.md).
+ */
+export type GatewayPayments = 'off' | 'credits';
+
+/**
+ * Why a top-up must not be bought, or null to allow it. Pay-per-request quotes
+ * ($0.001, offered when not signed in) are never paid, whatever the setting.
+ * `lastTopUpAt` is only consulted when everything else allows paying.
+ */
+export async function topUpRefusal(o: { payments: GatewayPayments; amount: string | null; lastTopUpAt: () => Promise<string | null> }): Promise<string | null> {
+	if (o.payments !== 'credits') return 'Alchemy gateway payments are off (ALCHEMY_GATEWAY_PAYMENTS)';
+	if (o.amount !== CREDITS_TOPUP_AMOUNT) return `quote of ${o.amount ?? 'an unknown amount'} base units is not the $1 credits top-up; pay-per-request is never paid`;
+	const last = await o.lastTopUpAt();
+	if (last) return `the app already bought credits at ${last}; at most one top-up per ${TOPUP_MIN_INTERVAL_MS / 3_600_000} h`;
+	return null;
+}
 
 /** How long to leave the key alone after each kind of refusal. */
 export const KEY_PAUSE_MS = { throughput: 60_000, monthly: 15 * 60_000 } as const;
@@ -70,10 +93,11 @@ export interface AlchemyRpcOptions {
 	/** A fetch that pays x402 challenges from that wallet (createPaidFetch). */
 	paidFetch: () => (input: string, init?: RequestInit) => Promise<Response>;
 	/**
-	 * Asked before buying a top-up, i.e. when the gateway answers 402. Return a
-	 * reason to refuse (e.g. "bought one 3 h ago"), or null to allow it.
+	 * Asked before buying a top-up, i.e. when the gateway answers 402, with the
+	 * quoted amount (USDC base units). Return a reason to refuse, or null to pay.
+	 * Required, so leaving it out cannot mean "pay".
 	 */
-	refuseTopUp?: () => Promise<string | null>;
+	refuseTopUp: (quote: { amount: string | null }) => Promise<string | null>;
 	fetch?: (input: string, init?: RequestInit) => Promise<Response>;
 	now?: () => number;
 	/** Called each time a call goes to the gateway, with why. */
@@ -132,7 +156,8 @@ export function createAlchemyRpc(o: AlchemyRpcOptions) {
 		// An expired or rejected sign-in: sign again once.
 		if (res.status === 401) res = await send(plainFetch, await token(true));
 		if (res.status === 402) {
-			const refused = await o.refuseTopUp?.();
+			const amount = decodePaymentRequired(res.headers.get('PAYMENT-REQUIRED'))?.accepts?.[0]?.amount ?? null;
+			const refused = await o.refuseTopUp({ amount });
 			if (refused) throw new AlchemyRpcError(`Alchemy (gateway): needs a credit top-up, refused: ${refused}`, 'gateway', 402);
 			res = await send(o.paidFetch(), await token());
 		}
