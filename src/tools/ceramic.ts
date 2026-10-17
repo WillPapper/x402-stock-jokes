@@ -1,4 +1,4 @@
-/** Step 2: Ceramic web search, paid per request (x402 exact, 0.001 USDC). */
+/** Step 2: Ceramic web search, paid per request (x402 exact, 0.001 USDC per query). */
 import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { asJson } from '../lib/json.ts';
@@ -6,40 +6,69 @@ import { paidDataFetch } from '../lib/env.ts';
 import { handoff } from '../lib/drafts.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 import { logEvent } from '../lib/log.ts';
+import { buildNewsQueries, companyKeyword, rankNews, type DropReason, type NewsItem, type RawNews } from '../lib/news.ts';
 import { decodePaymentRequired } from '../lib/x402.ts';
 
 export const CERAMIC_SEARCH_URL = 'https://api.ceramic.ai/search';
 
-export interface NewsResult {
-	title: string;
-	url: string;
-	description: string;
-}
 export interface NewsSearch {
+	symbol: string;
+	company: string;
+	/** All queries joined, kept for older readers of this shape. */
 	query: string;
-	results: NewsResult[];
+	queries: string[];
+	results: NewsItem[];
+	/** How many raw results each filter removed, so the ranking can be audited. */
+	dropped: Record<DropReason, number>;
+	rawCount: number;
+	/** Hint for the orchestrator about what the search found. */
+	note: string;
 	payments: PaymentRecord[];
 }
 
-export async function searchNewsFor(query: string, limit = 5): Promise<NewsSearch> {
-	const mark = ledger.mark();
+/** One paid Ceramic query, 20 results, short snippets. */
+export async function ceramicQuery(query: string, maxResults = 20): Promise<RawNews[]> {
 	const paid = paidDataFetch(`Ceramic search "${query.slice(0, 40)}"`);
 	const res = await paid(CERAMIC_SEARCH_URL, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ query }),
+		body: JSON.stringify({ query, maxResults, maxDescriptionLength: 1000 }),
 	});
 	if (!res.ok) {
 		const pr = decodePaymentRequired(res.headers.get('PAYMENT-REQUIRED'));
-		throw new Error(`Ceramic search failed: HTTP ${res.status} ${pr?.error ?? (await res.text()).slice(0, 200)}`);
+		throw new Error(`Ceramic search failed: HTTP ${res.status} ${pr?.error ?? (await res.text()).slice(0, 200)} [cf-ray ${res.headers.get('cf-ray') ?? '-'}]`);
 	}
-	const body = (await res.json()) as { result?: { results?: Partial<NewsResult>[] }; results?: Partial<NewsResult>[] };
-	const raw = body.result?.results ?? body.results ?? [];
-	return {
-		query,
-		results: raw.slice(0, limit).map((r) => ({ title: r.title ?? '(untitled)', url: r.url ?? '', description: (r.description ?? '').replace(/\s+/g, ' ').slice(0, 300) })),
-		payments: ledger.since(mark),
-	};
+	const body = (await res.json()) as { result?: { results?: RawNews[] }; results?: RawNews[] };
+	return body.result?.results ?? body.results ?? [];
+}
+
+/**
+ * Ceramic is lexical: one query returns evergreen "reasons to buy" pages, so
+ * we run three keyword queries (see src/lib/news.ts), merge them, drop
+ * listicles and quote pages, and rank dated company events first. Queries run
+ * one after another because the paid fetch tracks one pending payment at a time.
+ */
+export async function searchNewsFor(symbol: string, companyTitle?: string | null, limit = 6): Promise<NewsSearch> {
+	const mark = ledger.mark();
+	const sym = symbol.toUpperCase();
+	const company = companyKeyword(companyTitle ?? handoff.title(sym), sym);
+	const queries = buildNewsQueries(company, sym);
+	const raw: RawNews[] = [];
+	const failures: string[] = [];
+	for (const q of queries) {
+		try {
+			raw.push(...(await ceramicQuery(q)));
+		} catch (err) {
+			failures.push(`${q}: ${(err as Error).message}`);
+		}
+	}
+	if (!raw.length && failures.length) throw new Error(failures.join(' | '));
+	const ranked = rankNews(raw, { company, symbol: sym, limit });
+	const dated = ranked.items.filter((i) => i.date).length;
+	const note = ranked.items.length
+		? `${ranked.items.length} company news items ranked newest-first (${dated} with a publish date; Ceramic has no date filter, so prefer the dated ones). Listicles, quote pages and "reasons to buy" pieces were removed.`
+		: 'No usable company news found; write the joke from the StockTwits chatter instead.';
+	return { symbol: sym, company, query: queries.join(' | '), queries, results: ranked.items, dropped: ranked.dropped, rawCount: raw.length, note, payments: ledger.since(mark) };
 }
 
 /** Created per conversation so the full response can be stored with the joke. */
@@ -47,15 +76,18 @@ export const searchStockNews = (conversationId: string) =>
 	defineTool({
 	name: 'search_stock_news',
 	description:
-		'Step 2. Pay Ceramic (x402, USDC on Base) for a web search and get recent news headlines about the company. Call this after fetch_stocktwits_signals, with a query like "<company name> <TICKER> stock news".',
-	input: v.object({ query: v.pipe(v.string(), v.minLength(3), v.maxLength(200)) }),
+		'Step 2. Pay Ceramic (x402, USDC on Base) for three keyword web searches and get real company news: product launches, deals, lawsuits, earnings, executive changes, each with its source and publish date when known. Call this after fetch_stocktwits_signals with the ticker and the company title it returned. Listicles and "reasons to buy" pages are already filtered out.',
+	input: v.object({
+		symbol: v.pipe(v.string(), v.minLength(1), v.maxLength(12)),
+		company: v.optional(v.pipe(v.string(), v.maxLength(80))),
+	}),
 	durable: true,
 	async run({ data, step, log }) {
 		logEvent('tool.start', true, { tool: 'search_stock_news', input: data }, { conversationId, label: 'search_stock_news' });
 		try {
-		const news = await step.do(`ceramic:${data.query}`, () => searchNewsFor(data.query));
+		const news = await step.do(`ceramic:${data.symbol.toUpperCase()}`, () => searchNewsFor(data.symbol, data.company));
 		handoff.setStep(conversationId, 'ceramic', news);
-		log.info(`Ceramic: ${news.results.length} results for "${data.query}"; ${news.payments.length} payment(s)`);
+		log.info(`Ceramic: ${news.results.length} of ${news.rawCount} results kept for ${news.company} (${news.queries.length} queries, ${news.payments.length} payment(s))`);
 		logEvent('tool.done', true, { tool: 'search_stock_news', output: news }, { conversationId, label: 'search_stock_news' });
 		return { output: asJson(news) };
 		} catch (err) {

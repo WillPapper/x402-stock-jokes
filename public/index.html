@@ -282,7 +282,7 @@
   // ---- under the hood: a human summary first, the raw JSON behind a disclosure ----
   const HOOD = {
     stocktwits: { title: 'Step 1 · StockTwits', what: 'GET /api/2/symbols/show/<TICKER>.json through Cloudflare\'s Monetization Gateway (0.001 USDC, x402 exact scheme, settled on Base), plus the free symbol stream for recent posts.' },
-    ceramic: { title: 'Step 2 · Ceramic search', what: 'POST https://api.ceramic.ai/search through the Monetization Gateway (0.001 USDC, x402 exact).' },
+    ceramic: { title: 'Step 2 · Ceramic search', what: 'Three keyword searches on POST https://api.ceramic.ai/search through the Monetization Gateway (0.001 USDC each, x402 exact). Ceramic is lexical with no date filter, so the app merges the results, drops listicles and quote pages, and ranks dated company news first.' },
     joke: { title: 'Step 3 · AI Gateway', what: 'POST /ai/run on Cloudflare AI Gateway with Payment-Method: x402 (upto scheme: a ceiling is authorized, the real token cost is settled).' },
     turns: { title: 'Agent turns · AI Gateway', what: 'The orchestrator model itself runs through AI Gateway machine payments: every turn is an x402 authorization.' },
   };
@@ -290,22 +290,28 @@
   function hoodSummary(key, data) {
     if (!data || data.note) return `<p>${esc(data?.note || 'No data for this step.')}</p>`;
     if (key === 'stocktwits') {
-      const d = data;
-      const samples = (d.sampleMessages || []).slice(0, 3);
+      const d = data, st = d.stats || d;
+      const quotes = (d.quotes || d.sampleMessages || []).slice(0, 4);
       return dl([
         ['Symbol', esc([d.title, d.symbol, d.exchange].filter(Boolean).join(' · '))],
         ['Price', d.latestPrice ? esc(`$${d.latestPrice}${d.priceLow && d.priceHigh ? ` (range $${d.priceLow} – $${d.priceHigh})` : ''}`) : null],
-        ['Sentiment', d.messagesSampled != null ? esc(`${d.bullish} bullish · ${d.bearish} bearish · ${d.neutral} neutral of ${d.messagesSampled} posts`) : null],
-        ['Change', d.sentimentChange != null ? esc(`sentiment ${d.sentimentChange > 0 ? '+' : ''}${d.sentimentChange} · volume ${d.volumeChange > 0 ? '+' : ''}${d.volumeChange}`) : null],
-        ['Watchlist', d.watchlistCount != null ? esc(Number(d.watchlistCount).toLocaleString() + ' people') : null],
-      ]) + (samples.length ? `<p>Sample posts:</p><ul>${samples.map((m) => `<li>${esc(typeof m === 'string' ? m : m.body || JSON.stringify(m))}</li>`).join('')}</ul>` : '');
+        ['Mood', d.mood ? esc(d.mood) : null],
+        ['Sentiment', st.messagesSampled != null ? esc(`${st.bullish} bullish · ${st.bearish} bearish · ${st.neutral} neutral of ${st.messagesSampled} posts`) : null],
+        ['Change', st.sentimentChange != null ? esc(`sentiment ${st.sentimentChange > 0 ? '+' : ''}${st.sentimentChange} · volume ${st.volumeChange > 0 ? '+' : ''}${st.volumeChange}`) : null],
+        ['Watchlist', st.watchlistCount != null ? esc(Number(st.watchlistCount).toLocaleString() + ' people') : null],
+      ]) + (quotes.length ? `<p>Quotable posts:</p><ul>${quotes.map((m) => `<li>${esc(typeof m === 'string' ? m : m.text || m.body || JSON.stringify(m))}${m && m.sentiment ? ` <span class="muted">· ${esc(m.sentiment)}</span>` : ''}</li>`).join('')}</ul>` : '');
     }
     if (key === 'ceramic') {
       const rs = data.results || [];
-      return (data.query ? dl([['Query', esc(data.query)]]) : '') + (rs.length ? `<ul>${rs.map((r) => `<li>${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}${r.description ? ` <span class="muted">· ${esc(r.description.slice(0, 140))}${r.description.length > 140 ? '…' : ''}</span>` : ''}</li>`).join('')}</ul>` : '<p>No results.</p>');
+      const qs = data.queries || (data.query ? [data.query] : []);
+      const dropped = data.dropped ? Object.entries(data.dropped).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`).join(', ') : '';
+      return dl([
+        [qs.length > 1 ? 'Queries' : 'Query', qs.map(esc).join('<br>')],
+        ['Kept', data.rawCount != null ? esc(`${rs.length} of ${data.rawCount} results${dropped ? ` (dropped: ${dropped})` : ''}`) : null],
+      ]) + (rs.length ? `<ul>${rs.map((r) => `<li>${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}${r.source || r.date ? ` <span class="muted">· ${esc([r.source, r.date].filter(Boolean).join(' · '))}</span>` : ''}${r.description ? ` <span class="muted">· ${esc(r.description.slice(0, 140))}${r.description.length > 140 ? '…' : ''}</span>` : ''}</li>`).join('')}</ul>` : '<p>No results.</p>');
     }
     if (key === 'joke') {
-      const facts = data.facts || data.input?.facts || [];
+      const facts = data.facts || data.promptFacts || data.input?.facts || [];
       const u = data.usage;
       return dl([
         ['Model', esc(data.model || '')],
@@ -423,7 +429,7 @@
         const out = sdef.output || {}; runOutputs[name] = out;
         const pay = (out.payments || [])[0];
         let d = '';
-        if (name === 'fetch_stocktwits_signals') d = `${out.title || out.symbol}: last ${out.latestPrice ? '$' + out.latestPrice : 'n/a'}, ${out.bullish} bullish / ${out.bearish} bearish of ${out.messagesSampled} posts`;
+        if (name === 'fetch_stocktwits_signals') { const st = out.stats || out; d = `${out.title || out.symbol}: last ${out.latestPrice ? '$' + out.latestPrice : 'n/a'}, ${out.mood ? out.mood : `${st.bullish} bullish / ${st.bearish} bearish of ${st.messagesSampled} posts`}`; }
         else if (name === 'search_stock_news') d = (out.results || []).slice(0, 2).map((r) => r.title).join(' · ');
         else if (name === 'write_joke') d = `${out.model}`;
         setStep(name, 'done', d, receiptChip(pay));

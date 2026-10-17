@@ -6,6 +6,10 @@ import { config, paidInferenceFetch } from '../lib/env.ts';
 import { handoff } from '../lib/drafts.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 import { logEvent } from '../lib/log.ts';
+import { factsFor, jokeMessages, type JokeInput } from '../lib/joke-prompt.ts';
+
+export type { JokeInput } from '../lib/joke-prompt.ts';
+export { factsFor } from '../lib/joke-prompt.ts';
 
 export interface JokeResult {
 	joke: string;
@@ -14,26 +18,16 @@ export interface JokeResult {
 	payments: PaymentRecord[];
 }
 
-const SYSTEM = [
-	'You are a sharp, good-natured stand-up comedian who reads the markets.',
-	'Write exactly one joke about the stock described by the facts you are given.',
-	'Rules: at most 60 words; mention the ticker or company; work in at least one specific real datapoint from the facts (a price, a sentiment count, a headline);',
-	'no financial advice, no slurs, no jokes about individuals\' appearance; do not invent numbers.',
-	'Return only the joke text, no preamble, no quotes.',
-].join(' ');
-
-export async function writeJokeFor(symbol: string, facts: string[], model = config.jokeModel): Promise<JokeResult> {
+export async function writeJokeFor(input: JokeInput, model = config.jokeModel): Promise<JokeResult> {
 	const mark = ledger.mark();
+	const symbol = input.symbol.toUpperCase();
 	const paid = paidInferenceFetch(`AI Gateway joke (${model})`);
 	const body = JSON.stringify({
 		model,
 		input: {
-			messages: [
-				{ role: 'system', content: SYSTEM },
-				{ role: 'user', content: `Ticker: ${symbol}\nFacts:\n${facts.map((f) => `- ${f}`).join('\n')}` },
-			],
-			max_tokens: 600,
-			temperature: 0.9,
+			messages: jokeMessages({ ...input, symbol }),
+			max_tokens: 400,
+			temperature: 1.0,
 			// Thinking models (Gemma 4, Qwen 3.8, GLM 4.7) otherwise spend the whole
 			// budget reasoning about the joke; gpt-oss honors reasoning_effort instead.
 			...(model.startsWith('openai/') ? { reasoning_effort: 'low' } : { chat_template_kwargs: { enable_thinking: false } }),
@@ -75,21 +69,30 @@ export const writeJoke = (conversationId: string) =>
 	defineTool({
 	name: 'write_joke',
 	description:
-		'Step 3. Pay Cloudflare AI Gateway (x402 machine payments, USDC on Base) to generate the joke from the facts gathered in steps 1 and 2. Pass 3 to 8 short factual bullet points. Call this last, exactly once; if it fails, report the failure instead of calling it again.',
-	input: v.object({
-		symbol: v.pipe(v.string(), v.minLength(1), v.maxLength(12)),
-		facts: v.pipe(v.array(v.pipe(v.string(), v.maxLength(300))), v.minLength(1), v.maxLength(12)),
-	}),
+		'Step 3. Pay Cloudflare AI Gateway (x402 machine payments, USDC on Base) to write the joke. Pass news: 2 to 4 one-sentence company news items from search_stock_news (the premise; prefer dated, concrete events); chatter: 0 to 2 trader quotes from fetch_stocktwits_signals, only if funny; price: the latest price. Do not pass counts, tallies, percentages or watchlist sizes. Call this last, exactly once; if it fails, report the failure instead of calling it again.',
+	input: v.pipe(
+		v.object({
+			symbol: v.pipe(v.string(), v.minLength(1), v.maxLength(12)),
+			company: v.optional(v.pipe(v.string(), v.maxLength(80))),
+			news: v.pipe(v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(300))), v.maxLength(5)),
+			chatter: v.optional(v.pipe(v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(300))), v.maxLength(3))),
+			price: v.optional(v.pipe(v.string(), v.maxLength(40))),
+		}),
+		v.check((d) => d.news.length + (d.chatter?.length ?? 0) > 0, 'pass at least one news item or trader quote'),
+	),
 	durable: true,
 	async run({ data, step, log }) {
-		logEvent('tool.start', true, { tool: 'write_joke', input: data }, { conversationId, label: 'write_joke' });
+		const symbol = data.symbol.toUpperCase();
+		const input: JokeInput = { ...data, symbol, company: data.company ?? handoff.title(symbol) };
+		const facts = factsFor(input);
+		logEvent('tool.start', true, { tool: 'write_joke', input: data, facts }, { conversationId, label: 'write_joke' });
 		try {
-		const result = await step.do(`joke:${data.symbol.toUpperCase()}`, () => writeJokeFor(data.symbol.toUpperCase(), data.facts));
-		handoff.setDraft(conversationId, { symbol: data.symbol.toUpperCase(), facts: data.facts, joke: result.joke, model: result.model });
-		handoff.setStep(conversationId, 'joke', { ...result, promptFacts: data.facts });
+		const result = await step.do(`joke:${symbol}`, () => writeJokeFor(input));
+		handoff.setDraft(conversationId, { symbol, facts, joke: result.joke, model: result.model });
+		handoff.setStep(conversationId, 'joke', { ...result, input: data, facts, promptFacts: facts });
 		log.info(`Joke from ${result.model}: ${result.joke.slice(0, 80)}…`);
-		logEvent('tool.done', true, { tool: 'write_joke', output: { ...result, promptFacts: data.facts } }, { conversationId, label: 'write_joke' });
-		return { output: asJson(result) };
+		logEvent('tool.done', true, { tool: 'write_joke', output: { ...result, input: data, facts, promptFacts: facts } }, { conversationId, label: 'write_joke' });
+		return { output: asJson({ ...result, facts }) };
 		} catch (err) {
 			logEvent('tool.error', false, { tool: 'write_joke', error: (err as Error).message.slice(0, 400) }, { conversationId, label: 'write_joke' });
 			throw err;
