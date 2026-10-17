@@ -140,6 +140,18 @@ export async function recordAccess(conversationId: string, paidBy: 'password' | 
 		.run();
 }
 
+/** When each of these conversations was admitted by an x402 payment (conversation id → ISO time). */
+export async function x402AccessTimes(conversationIds: string[]): Promise<Map<string, string>> {
+	const out = new Map<string, string>();
+	for (let i = 0; i < conversationIds.length; i += 50) {
+		const chunk = conversationIds.slice(i, i + 50);
+		const marks = chunk.map((_, k) => `?${k + 1}`).join(', ');
+		const { results } = await db().prepare(`SELECT conversation_id, created_at FROM access WHERE paid_by = 'x402' AND conversation_id IN (${marks})`).bind(...chunk).all<{ conversation_id: string; created_at: string }>();
+		for (const r of results) out.set(r.conversation_id, r.created_at);
+	}
+	return out;
+}
+
 export async function accessFor(conversationId: string): Promise<{ paidBy: 'password' | 'x402'; amountUsdc: string | null } | null> {
 	const r = await db().prepare('SELECT paid_by, amount_usdc FROM access WHERE conversation_id = ?1').bind(conversationId).first<{ paid_by: string; amount_usdc: string | null }>();
 	return r ? { paidBy: r.paid_by as 'password' | 'x402', amountUsdc: r.amount_usdc } : null;

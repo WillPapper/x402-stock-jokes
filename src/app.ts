@@ -7,7 +7,8 @@ import { Joke } from './agents/joke.ts';
 import { PRICE_USDC, checkAccess, paidResource, paymentRequiredBody } from './lib/access.ts';
 import { jokeConversationId } from './lib/ids.ts';
 import { createX402AiGatewayProvider } from './lib/ai-gateway-provider.ts';
-import { jokeForConversation, jokeStats, latestJokeFor, listJokes, recordAccess, type JokeRow } from './lib/db.ts';
+import { jokeForConversation, jokeStats, latestJokeFor, listJokes, recordAccess, x402AccessTimes, type JokeRow } from './lib/db.ts';
+import { matchBuyers } from './lib/buyer.ts';
 import { amountsByHash, summarize, walletTransfers, type Transfer } from './lib/transfers.ts';
 import { config, paidInferenceFetch } from './lib/env.ts';
 import { ledger } from './lib/ledger.ts';
@@ -225,7 +226,7 @@ async function statusFromDb(id: string) {
 
 // ---- Human-readable permalink: one joke as a shareable page with Open Graph tags. ----
 const escapeHtml = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
-const PAGE_CSS = `:root{--bg:#f6f4ee;--fg:#1d1c1a;--muted:#6b675f;--card:#fff;--line:#e4e0d6;--accent:#0d6b5e;--chip:#eef4f2}@media(prefers-color-scheme:dark){:root{--bg:#141413;--fg:#ecebe7;--muted:#9b978f;--card:#1e1e1c;--line:#2d2d2a;--accent:#5fd3bf;--chip:#242a28}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}main{max-width:720px;margin:0 auto;padding:36px 16px 64px}a{color:var(--accent);text-underline-offset:2px}.top{font-size:14px;color:var(--muted);margin:0 0 18px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px}.meta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin-bottom:8px}.ticker{font-weight:700;color:var(--fg);font-size:15px}.joke{font-size:24px;line-height:1.35;margin:0 0 14px;white-space:pre-wrap}.based{color:var(--muted);font-size:15px;margin:0 0 14px}.chips{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;min-height:30px;font:13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 10px;border-radius:999px;background:var(--chip);white-space:nowrap;gap:6px}.chip a{text-decoration:none}.chip.x402{background:var(--accent);color:#fff;font-weight:600}.links{margin-top:18px;font-size:14px;color:var(--muted)}.cta{display:inline-block;margin-top:22px;padding:12px 18px;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;text-decoration:none}`;
+const PAGE_CSS = `:root{--bg:#f6f4ee;--fg:#1d1c1a;--muted:#6b675f;--card:#fff;--line:#e4e0d6;--accent:#0d6b5e;--chip:#eef4f2}@media(prefers-color-scheme:dark){:root{--bg:#141413;--fg:#ecebe7;--muted:#9b978f;--card:#1e1e1c;--line:#2d2d2a;--accent:#5fd3bf;--chip:#242a28}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}main{max-width:720px;margin:0 auto;padding:36px 16px 64px}a{color:var(--accent);text-underline-offset:2px}.top{font-size:14px;color:var(--muted);margin:0 0 18px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px}.meta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin-bottom:8px}.ticker{font-weight:700;color:var(--fg);font-size:15px}.joke{font-size:24px;line-height:1.35;margin:0 0 14px;white-space:pre-wrap}.based{color:var(--muted);font-size:15px;margin:0 0 14px}.chips{display:flex;flex-wrap:wrap;gap:6px}.chip{display:inline-flex;align-items:center;min-height:30px;font:13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 10px;border-radius:999px;background:var(--chip);white-space:nowrap;gap:6px}.chip a{text-decoration:none}.chip.x402{background:var(--accent);color:#fff;font-weight:600}.chip.x402 a{color:inherit;border-left:1px solid rgba(255,255,255,.4);padding-left:8px;margin-left:2px}.chip.x402 a:hover{text-decoration:underline}.links{margin-top:18px;font-size:14px;color:var(--muted)}.cta{display:inline-block;margin-top:22px;padding:12px 18px;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;text-decoration:none}`;
 function pageShell(opts: { title: string; description: string; url: string; body: string; extraHead?: string }) {
 	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(opts.title)}</title><meta name="description" content="${escapeHtml(opts.description)}"><link rel="canonical" href="${escapeHtml(opts.url)}"><meta property="og:type" content="article"><meta property="og:site_name" content="Stock Jokes"><meta property="og:title" content="${escapeHtml(opts.title)}"><meta property="og:description" content="${escapeHtml(opts.description)}"><meta property="og:url" content="${escapeHtml(opts.url)}"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="${escapeHtml(opts.title)}"><meta name="twitter:description" content="${escapeHtml(opts.description)}"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d6b5e'/%3E%3Ctext x='32' y='44' font-family='system-ui,sans-serif' font-size='36' font-weight='700' text-anchor='middle' fill='%23fff'%3E%24%3C/text%3E%3C/svg%3E">${opts.extraHead ?? ''}<style>${PAGE_CSS}</style></head><body><main><p class="top"><a href="/">Stock Jokes</a> · every step is an x402 micro-payment in USDC on Base</p>${opts.body}</main></body></html>`;
 }
@@ -250,7 +251,11 @@ app.get('/j/:id', async (c) => {
 		return p.tx ? `<span class="chip">${escapeHtml(label)} <a href="${escapeHtml(p.tx)}" target="_blank" rel="noopener" title="USDC transfer on Basescan">${amt} ↗</a></span>` : `<span class="chip" title="upto scheme: ceiling authorized, actual cost settled">${escapeHtml(label)} ≤ ${amt}</span>`;
 	};
 	const chips = [
-		row.paidBy === 'x402' ? '<span class="chip x402" title="The buyer paid 0.10 USDC through the Monetization Gateway">paid via x402</span>' : '',
+		row.paidBy === 'x402'
+			? j.buyer?.tx
+				? `<span class="chip x402" title="The buyer's ${j.buyer.usdc.toFixed(2)} USDC through the Monetization Gateway, from ${escapeHtml(j.buyer.from)}">paid via x402 <a href="${escapeHtml(j.buyer.tx)}" target="_blank" rel="noopener" title="The buyer's USDC transfer on Basescan">${j.buyer.usdc.toFixed(2)} ↗</a></span>`
+				: '<span class="chip x402" title="The buyer paid 0.10 USDC through the Monetization Gateway">paid via x402</span>'
+			: '',
 		...SELLER_LABEL.map(([needle, label]) => chip(label, row.payments.find((p) => p.label.includes(needle)))),
 		turns.length ? `<span class="chip">${turns.length} agent turn${turns.length === 1 ? '' : 's'}</span>` : '',
 		j.paid ? `<span class="chip" title="Settled USDC transfers for this joke"><b>paid ${j.paid.totalUsdc.toFixed(4)} USDC</b> on-chain</span>` : '',
@@ -273,7 +278,8 @@ app.get('/j/:id', async (c) => {
  */
 const JOKE_WINDOW_BEFORE_MS = 180_000;
 const JOKE_WINDOW_AFTER_MS = 30_000;
-async function withSettled(rows: JokeRow[]): Promise<(JokeRow & { paid: { exactUsdc: number; exactCount: number; aiUsdc: number; aiCount: number; totalUsdc: number } })[]> {
+type Buyer = { usdc: number; from: string; tx: string | null; at: string };
+async function withSettled(rows: JokeRow[]): Promise<(JokeRow & { paid: { exactUsdc: number; exactCount: number; aiUsdc: number; aiCount: number; totalUsdc: number }; buyer: Buyer | null })[]> {
 	let transfers: Transfer[] = [];
 	try {
 		transfers = await walletTransfers(walletFromKey(config.privateKey).address);
@@ -282,7 +288,20 @@ async function withSettled(rows: JokeRow[]): Promise<(JokeRow & { paid: { exactU
 	}
 	const byHash = amountsByHash(transfers);
 	const ai = transfers.filter((t) => t.direction === 'out' && t.party === 'AI Gateway' && t.at).map((t) => ({ ms: Date.parse(t.at), usdc: t.usdc }));
+	// The buyer's 0.10 USDC for an x402 joke: the gateway's token has no hash, so it is
+	// the inflow nearest to the gate's admission time (see lib/buyer.ts).
+	const paidIds = rows.filter((r) => r.paidBy === 'x402').map((r) => r.conversationId);
+	let buyers = new Map<string, Transfer>();
+	if (paidIds.length && transfers.length) {
+		try {
+			buyers = matchBuyers(await x402AccessTimes(paidIds), transfers, Number(PRICE_USDC));
+		} catch (err) {
+			console.warn('buyer match unavailable', (err as Error).message.slice(0, 120));
+		}
+	}
 	return rows.map((r) => {
+		const b = buyers.get(r.conversationId);
+		const buyer: Buyer | null = b ? { usdc: b.usdc, from: b.from, tx: basescanTxUrl(b.hash), at: b.at } : null;
 		let exactUsdc = 0;
 		let exactCount = 0;
 		for (const p of r.payments) {
@@ -295,7 +314,7 @@ async function withSettled(rows: JokeRow[]): Promise<(JokeRow & { paid: { exactU
 		const end = Date.parse(r.createdAt);
 		const inWindow = ai.filter((t) => t.ms >= end - JOKE_WINDOW_BEFORE_MS && t.ms <= end + JOKE_WINDOW_AFTER_MS);
 		const aiUsdc = inWindow.reduce((s, t) => s + t.usdc, 0);
-		return { ...r, paid: { exactUsdc: +exactUsdc.toFixed(6), exactCount, aiUsdc: +aiUsdc.toFixed(6), aiCount: inWindow.length, totalUsdc: +(exactUsdc + aiUsdc).toFixed(6) } };
+		return { ...r, paid: { exactUsdc: +exactUsdc.toFixed(6), exactCount, aiUsdc: +aiUsdc.toFixed(6), aiCount: inWindow.length, totalUsdc: +(exactUsdc + aiUsdc).toFixed(6) }, buyer };
 	});
 }
 app.get('/api/jokes', async (c) => {

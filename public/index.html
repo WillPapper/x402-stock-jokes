@@ -89,6 +89,7 @@
   .chip a { color:var(--accent); text-decoration:none }
   .chip a:hover { text-decoration:underline }
   .chip.x402 { background:var(--accent); color:var(--accent-fg); font-weight:600 }
+  .chip.x402 a { color:inherit; border-left:1px solid color-mix(in srgb, var(--accent-fg) 40%, transparent); padding-left:8px; margin-left:2px }
   .chipgroup { display:inline-flex; align-items:stretch; border-radius:999px; background:var(--chip); overflow:hidden; min-height:30px }
   .chipgroup .badge { border-radius:0; min-height:30px; padding:0 10px }
   .chipgroup a, .chipgroup .amt { display:inline-flex; align-items:center; padding:0 10px 0 8px; border-left:1px solid var(--card); color:var(--accent); font:13px/1 var(--mono); text-decoration:none; white-space:nowrap }
@@ -447,7 +448,12 @@
     const find = (needle) => pays.find((p) => p.label.includes(needle));
     const st = find('StockTwits symbols'), ce = find('Ceramic'), jk = find('AI Gateway joke');
     const group = (key, name, p) => `<span class="chipgroup"><button type="button" class="badge" data-k="${key}" aria-expanded="false" title="See what ${esc(name)} returned">${esc(name)}</button>${p ? (p.tx ? `<a href="${esc(p.tx)}" target="_blank" rel="noopener" title="USDC transfer on Basescan">${money(p.authorizedUsdc)} ↗</a>` : `<span class="amt" title="upto scheme: ceiling authorized, actual cost settled by AI Gateway">≤ ${money(p.authorizedUsdc)}</span>`) : ''}</span>`;
-    return `${j.paidBy === 'x402' ? '<span class="chip x402" title="The buyer paid 0.10 USDC through the Monetization Gateway">paid via x402</span>' : ''}${group('stocktwits', 'StockTwits', st)}${group('ceramic', 'Ceramic', ce)}${group('joke', 'AI Gateway joke', jk)}${group('turns', `${turns.length} agent turn${turns.length === 1 ? '' : 's'}`, null)}${j.paid ? `<span class="chip" title="Settled USDC transfers for this joke: StockTwits + Ceramic ${j.paid.exactUsdc.toFixed(4)}, AI Gateway ${j.paid.aiUsdc.toFixed(4)}"><b>paid ${j.paid.totalUsdc.toFixed(4)} USDC</b> on-chain</span>` : ''}`;
+    // The buyer's own 0.10 USDC: matched on-chain by the server (the gateway token carries no hash).
+    const b = j.buyer;
+    const x402 = j.paidBy !== 'x402' ? '' : b?.tx
+      ? `<span class="chip x402" title="The buyer's ${money(b.usdc, 2)} USDC through the Monetization Gateway, from ${esc(b.from)}">paid via x402 <a href="${esc(b.tx)}" target="_blank" rel="noopener" title="The buyer's USDC transfer on Basescan">${money(b.usdc, 2)} ↗</a></span>`
+      : '<span class="chip x402" title="The buyer paid 0.10 USDC through the Monetization Gateway">paid via x402</span>';
+    return `${x402}${group('stocktwits', 'StockTwits', st)}${group('ceramic', 'Ceramic', ce)}${group('joke', 'AI Gateway joke', jk)}${group('turns', `${turns.length} agent turn${turns.length === 1 ? '' : 's'}`, null)}${j.paid ? `<span class="chip" title="Settled USDC transfers for this joke: StockTwits + Ceramic ${j.paid.exactUsdc.toFixed(4)}, AI Gateway ${j.paid.aiUsdc.toFixed(4)}"><b>paid ${j.paid.totalUsdc.toFixed(4)} USDC</b> on-chain</span>` : ''}`;
   }
   function wireBadges(el, j) {
     const pays = j.payments || [];
