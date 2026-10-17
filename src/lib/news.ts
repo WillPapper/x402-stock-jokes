@@ -24,7 +24,7 @@ export interface NewsItem {
 	description: string;
 }
 
-export type DropReason = 'duplicate' | 'listicle' | 'index' | 'junk' | 'off-topic' | 'stale';
+export type DropReason = 'duplicate' | 'listicle' | 'index' | 'junk' | 'off-topic' | 'stale' | 'undated' | 'old';
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 const CORPORATE_SUFFIX = /[,\s]+(inc|incorporated|corp|corporation|co|company|ltd|limited|plc|llc|holdings?|group|sa|nv|ag|se)\.?$/i;
@@ -175,24 +175,36 @@ const ANALYST_WORDS = /\b(analyst|rating|upgrade[sd]?|downgrade[sd]?|price targe
 export interface RankedNews {
 	items: NewsItem[];
 	dropped: Record<DropReason, number>;
+	/** The newest full publish date among the kept items (YYYY-MM-DD), or null when none carries one. */
+	newest: string | null;
 }
 
+/** Days after which a dated item is dropped outright. */
+export const STALE_DAYS = 540;
+/** A bare year counts as current when it is at most this old. */
+export const YEAR_ONLY_FRESH_DAYS = 400;
+/** Dated items more than this much older than the newest one are dropped as old. */
+export const SPREAD_DAYS = 270;
+
 /**
- * Dedupes, filters and ranks raw results. Scoring: a date in the last month
- * beats everything; undated items sit between recent and old ones; concrete
- * company events rank above analyst-rating pieces; items more than three
- * years old are dropped as stale. Items whose title and snippet never mention
- * the company or ticker are dropped as off-topic.
+ * Dedupes, filters and ranks raw results. Scoring: a date in the last week or
+ * month beats everything; concrete company events rank above analyst-rating
+ * pieces. Recency gate: items older than STALE_DAYS are dropped; when any
+ * fully dated item survives, undated items (Nike's 2023 NFT drop had no date
+ * anywhere) and items more than SPREAD_DAYS older than the newest are dropped
+ * too, so the set the model sees is as fresh as Ceramic allows.
+ * Items whose title and snippet never mention the company or ticker are
+ * dropped as off-topic.
  */
 export function rankNews(raw: RawNews[], opts: { company: string; symbol: string; now?: Date; limit?: number }): RankedNews {
 	const now = opts.now ?? new Date();
 	const limit = opts.limit ?? 6;
-	const dropped: Record<DropReason, number> = { duplicate: 0, listicle: 0, index: 0, junk: 0, 'off-topic': 0, stale: 0 };
+	const dropped: Record<DropReason, number> = { duplicate: 0, listicle: 0, index: 0, junk: 0, 'off-topic': 0, stale: 0, undated: 0, old: 0 };
 	const seen = new Set<string>();
 	const company = opts.company.toLowerCase();
 	const companyFirst = company.split(/\s+/)[0] ?? company;
 	const symbolRe = new RegExp(`\\b\\$?${opts.symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-	const scored: { item: NewsItem; score: number }[] = [];
+	const scored: { item: NewsItem; score: number; ageDays: number | null; yearOnly: boolean }[] = [];
 
 	for (const r of raw) {
 		const title = (r.title ?? '').replace(/\s+/g, ' ').trim();
@@ -242,14 +254,15 @@ export function rankNews(raw: RawNews[], opts: { company: string; symbol: string
 			const [y, m, d] = date.split('-').map(Number);
 			ageDays = (now.getTime() - Date.UTC(y!, (m ?? 7) - 1, d ?? 15)) / 86_400_000;
 		}
-		if (ageDays !== null && ageDays > 3 * 365) {
+		if (ageDays !== null && ageDays > STALE_DAYS) {
 			dropped.stale++;
 			continue;
 		}
 		let score = 0;
 		const yearOnly = date !== null && date.length === 4;
 		if (ageDays === null) score += 40;
-		else if (yearOnly) score += ageDays <= 400 ? 45 : 20; // a bare year is weak evidence: just above undated
+		else if (yearOnly) score += ageDays <= YEAR_ONLY_FRESH_DAYS ? 45 : 20; // a bare year is weak evidence: just above undated
+		else if (ageDays <= 7) score += 110;
 		else if (ageDays <= 31) score += 100;
 		else if (ageDays <= 120) score += 70;
 		else if (ageDays <= 400) score += 50;
@@ -258,8 +271,27 @@ export function rankNews(raw: RawNews[], opts: { company: string; symbol: string
 		if (ANALYST_WORDS.test(title)) score -= 20;
 		if (title.toLowerCase().includes(companyFirst)) score += 10;
 		if (/benzinga|businessinsider|reuters|bloomberg|cnbc|wsj|ft\.com|theverge|techcrunch|apnews|investorplace|fool\.com|marketwatch|barrons|yahoo/i.test(host)) score += 5;
-		scored.push({ item: { title: title.slice(0, 160), url, source: host, date, description: cleanSnippet(desc, title) }, score });
+		scored.push({ item: { title: title.slice(0, 160), url, source: host, date, description: cleanSnippet(desc, title) }, score, ageDays, yearOnly });
 	}
-	scored.sort((a, b) => b.score - a.score);
-	return { items: scored.slice(0, limit).map((s) => s.item), dropped };
+	// Recency gate, relative to the freshest fully dated item.
+	const fullDated = scored.filter((s) => s.ageDays !== null && !s.yearOnly);
+	const newestAge = fullDated.length ? Math.min(...fullDated.map((s) => s.ageDays!)) : null;
+	let kept = scored;
+	if (newestAge !== null) {
+		kept = scored.filter((s) => {
+			if (s.ageDays === null) {
+				dropped.undated++;
+				return false;
+			}
+			if (s.ageDays > newestAge + SPREAD_DAYS) {
+				dropped.old++;
+				return false;
+			}
+			return true;
+		});
+	}
+	kept.sort((a, b) => b.score - a.score);
+	const items = kept.slice(0, limit).map((s) => s.item);
+	const newest = items.filter((i) => i.date && i.date.length === 10).map((i) => i.date!).sort().at(-1) ?? null;
+	return { items, dropped, newest };
 }

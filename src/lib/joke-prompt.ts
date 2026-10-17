@@ -12,7 +12,7 @@ export const SYSTEM = [
 	'The joke must be about something in the news items. Use the price only if it makes the punchline land, and never use more than one number in total.',
 	'Never recite statistics: no sentiment counts, bullish or bearish tallies, watchlist sizes, percentages or volume changes.',
 	'A trader quote may appear only if it is funnier than the news; paraphrase it in at most eight quoted words.',
-	'Do not say "just", "today" or "this week" about an item unless it carries a date from the last month; joke about what happened, not when.',
+	'Each news item starts with its date and you are told today\'s date. An item older than a month is a past event: joke about what happened then, never say or imply it is pending, upcoming, happening now or "just" happened, and do not guess what came after it.',
 	'No financial advice, no slurs, nothing about anyone\'s appearance; do not invent events, products, names or numbers beyond what you were given.',
 	'Return only the joke text, no preamble, no quotation marks around it.',
 ].join(' ');
@@ -25,6 +25,8 @@ export interface JokeInput {
 	/** Trader quotes, optional colour. */
 	chatter?: string[];
 	price?: string | null;
+	/** Today's date, YYYY-MM-DD, so the model can tell old news from current news. */
+	today?: string;
 }
 
 /** The facts as stored with the joke and shown under "Based on": news first, then chatter, then the price. */
@@ -37,7 +39,7 @@ export function factsFor(input: JokeInput): string[] {
 }
 
 export function userPrompt(input: JokeInput): string {
-	const lines = [`Ticker: ${input.symbol}${input.company ? ` (${input.company})` : ''}`];
+	const lines = [`Ticker: ${input.symbol}${input.company ? ` (${input.company})` : ''}`, `Today: ${input.today ?? new Date().toISOString().slice(0, 10)}`];
 	lines.push('', 'NEWS (the premise; pick the funniest angle):', ...(input.news.length ? input.news.map((f) => `- ${f}`) : ['- (none found)']));
 	if (input.chatter?.length) lines.push('', 'Trader chatter (optional colour, only if funnier than the news):', ...input.chatter.map((q) => `- "${q.replace(/^"|"$/g, '')}"`));
 	if (input.price) lines.push('', `Price: $${String(input.price).replace(/^\$/, '')} (optional, use only if the punchline needs it)`);

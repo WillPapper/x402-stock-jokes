@@ -85,7 +85,45 @@ describe('rankNews', () => {
 		expect(ranked.dropped.index).toBeGreaterThanOrEqual(4);
 		expect(ranked.dropped.junk).toBe(1);
 		expect(ranked.dropped['off-topic']).toBe(1);
-		expect(ranked.dropped.stale).toBe(1);
+		expect(ranked.dropped.stale).toBe(2); // 2017 Vega piece and the 2024 D23 awards page (18-month cutoff)
 		expect(ranked.dropped.duplicate).toBe(1);
+	});
+	test('reports the newest full date', () => {
+		expect(ranked.newest).toBe('2025-10-06');
+	});
+});
+
+describe('rankNews recency gate', () => {
+	const nike = [
+		{ title: 'NIKE, Inc. Announces First Quarter Fiscal 2026 Earnings and Conference Call', url: 'https://www.businesswire.com/news/home/20250828728146/en/x', description: 'BEAVERTON, Ore., Aug. 28, 2025 Nike' },
+		{ title: 'Nike Unveils First .Swoosh NFT Digital Sneaker Drop - Decrypt', url: 'https://decrypt.co/137011/nike-unveils-first-swoosh-nft', description: 'Nike digital sneakers' },
+		{ title: 'Nike Announces Top 24 Teams for Nike Track Nationals', url: 'https://www.milesplit.com/articles/46879', description: 'Nike track' },
+		{ title: 'Nike Stock After Q2 2026 Earnings China Sales Drop', url: 'https://successknocks.com/nike-q2-2026/', description: 'Nike' },
+		{ title: 'Nike Sues Lululemon Over At-Home Mirror Gym', url: 'https://www.benzinga.com/news/22/01/24923345/nike-sues-lululemon', description: 'Nike' },
+	];
+	test('once a dated item is recent enough, undated items and much older ones are dropped', () => {
+		const r = rankNews(nike, { company: 'Nike', symbol: 'NKE', now, limit: 6 });
+		const titles = r.items.map((i) => i.title).join('\n');
+		expect(titles).toContain('First Quarter Fiscal 2026');
+		expect(titles).toContain('Q2 2026'); // a bare current year is kept, just ranked low
+		expect(titles).not.toMatch(/NFT|Track Nationals|Lululemon/);
+		expect(r.dropped.undated).toBe(2);
+		expect(r.dropped.stale).toBe(1); // 2022 is past 18 months
+		expect(r.newest).toBe('2025-08-28');
+	});
+	test('with no dated anchor, undated items survive and newest is null', () => {
+		const r = rankNews(nike.slice(1, 3), { company: 'Nike', symbol: 'NKE', now, limit: 6 });
+		expect(r.items).toHaveLength(2);
+		expect(r.dropped.undated).toBe(0);
+		expect(r.newest).toBeNull();
+	});
+	test('an item far older than the newest is dropped as old', () => {
+		const raw = [
+			{ title: 'Acme announces layoffs', url: 'https://x.test/2026/09/01/acme-layoffs', description: 'Acme' },
+			{ title: 'Acme opens new plant', url: 'https://x.test/2025/09/01/acme-plant', description: 'Acme' },
+		];
+		const r = rankNews(raw, { company: 'Acme', symbol: 'ACME', now, limit: 6 });
+		expect(r.items.map((i) => i.title)).toEqual(['Acme announces layoffs']);
+		expect(r.dropped.old).toBe(1);
 	});
 });

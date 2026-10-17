@@ -21,6 +21,8 @@ export interface NewsSearch {
 	/** How many raw results each filter removed, so the ranking can be audited. */
 	dropped: Record<DropReason, number>;
 	rawCount: number;
+	/** Newest full publish date among the kept items; Ceramic's index trails the news, so this is often months old. */
+	newestDate: string | null;
 	/** Hint for the orchestrator about what the search found. */
 	note: string;
 	payments: PaymentRecord[];
@@ -63,12 +65,21 @@ export async function searchNewsFor(symbol: string, companyTitle?: string | null
 		}
 	}
 	if (!raw.length && failures.length) throw new Error(failures.join(' | '));
-	const ranked = rankNews(raw, { company, symbol: sym, limit });
-	const dated = ranked.items.filter((i) => i.date).length;
+	const now = new Date();
+	const ranked = rankNews(raw, { company, symbol: sym, now, limit });
 	const note = ranked.items.length
-		? `${ranked.items.length} company news items ranked newest-first (${dated} with a publish date; Ceramic has no date filter, so prefer the dated ones). Listicles, quote pages and "reasons to buy" pieces were removed.`
+		? `${ranked.items.length} company news items, newest first. ${describeAge(ranked.newest, now)} Listicles, quote pages, undated and older pieces were removed.`
 		: 'No usable company news found; write the joke from the StockTwits chatter instead.';
-	return { symbol: sym, company, query: queries.join(' | '), queries, results: ranked.items, dropped: ranked.dropped, rawCount: raw.length, note, payments: ledger.since(mark) };
+	return { symbol: sym, company, query: queries.join(' | '), queries, results: ranked.items, dropped: ranked.dropped, rawCount: raw.length, newestDate: ranked.newest, note, payments: ledger.since(mark) };
+}
+
+/** "The newest item is from 2026-04-17, about 6 months ago; …" so neither model treats it as today's news. */
+export function describeAge(newest: string | null, now = new Date()): string {
+	if (!newest) return 'None of these items carries a publish date, so they may be old; treat them as past events, not current news.';
+	const days = Math.round((now.getTime() - Date.parse(newest)) / 86_400_000);
+	const ago = days <= 1 ? 'today' : days < 45 ? `${days} days ago` : days < 365 ? `about ${Math.round(days / 30)} months ago` : `about ${(days / 365).toFixed(1)} years ago`;
+	const warn = days > 45 ? ' Nothing newer is in the search index (it trails the news by months), so treat these as past events, not current news.' : '';
+	return `The newest item is from ${newest}, ${ago}.${warn}`;
 }
 
 /**
@@ -80,7 +91,8 @@ export function newsForModel(news: NewsSearch) {
 	return {
 		company: news.company,
 		items: news.results.slice(0, 5).map((r) => ({ date: r.date ?? 'undated', title: r.title.slice(0, 120), source: r.source, snippet: r.description.slice(0, 120) || undefined })),
-		note: news.results.length ? 'Newest first; undated items may be old. Pick the 2 or 3 most concrete company events.' : news.note,
+		today: new Date().toISOString().slice(0, 10),
+		note: news.results.length ? `${describeAge(news.newestDate)} Pick the 2 or 3 most concrete company events and keep their dates.` : news.note,
 	};
 }
 
