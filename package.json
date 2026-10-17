@@ -7,6 +7,7 @@
 		"build": "vite build",
 		"deploy": "vite build && wrangler deploy",
 		"check:types": "tsc --noEmit",
+		"check": "bun run check:types && bun test",
 		"wallet:new": "bun scripts/wallet-new.ts",
 		"approve": "bun scripts/approve-permit2.ts",
 		"doctor": "bun scripts/doctor.ts",

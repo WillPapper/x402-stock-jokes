@@ -18,7 +18,7 @@ This is a [Flue](https://flueframework.com) project: agents are TypeScript funct
 
 - `bun run dev` — start the dev server (needs `.dev.vars`, see README).
 - `bun run deploy` — build and deploy the Worker.
-- `bun run check:types` — typecheck; `bun test` — unit tests.
+- `bun run check:types` — typecheck; `bun test` — unit tests; `bun run check` — both, failing on either.
 - `bun run doctor` — check wallet, allowance and the live 402 quotes before spending.
 - `bun run db:migrate` / `bun run db:migrate:local` — apply D1 migrations (migrations/).
 - `bunx flue docs search <query>` — search the Flue docs from the terminal (then `bunx flue docs read <path>`).
