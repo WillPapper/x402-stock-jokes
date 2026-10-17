@@ -1,11 +1,11 @@
 'use agent';
 import { useAgentFinish, useAgentStart, useModel, useResponseFinish, useResponseStart, useTool } from '@flue/runtime';
 import { X402_PROVIDER_ID } from '../lib/ai-gateway-provider.ts';
-import { archivedSteps } from '../lib/archive.ts';
+import { archivedPayments, archivedSteps } from '../lib/archive.ts';
 import { accessFor, completeJoke, insertJoke } from '../lib/db.ts';
 import { handoff } from '../lib/drafts.ts';
 import { config } from '../lib/env.ts';
-import { ledger } from '../lib/ledger.ts';
+import { ledger, totalAuthorizedUsdc } from '../lib/ledger.ts';
 import { conversationScope, logEvent } from '../lib/log.ts';
 import { whereAmI } from '../cloudflare.ts';
 import { searchStockNews } from '../tools/ceramic.ts';
@@ -23,17 +23,25 @@ export function Joke({ id }: { id: string }) {
 	useTool(searchStockNews(id));
 	useTool(writeJoke(id));
 
+	// The render runs before every model turn, including the first turn after a
+	// Durable Object restart, when useAgentStart does not run again. Setting the
+	// log scope here keeps the resumed run's payment events tagged with this
+	// conversation (a Nintendo run's post-restart payments were logged with no
+	// conversation id, 2026-10-17). A module-level variable, not Flue state.
+	conversationScope.set(id);
+
 	// Attach every payment made during this response to the reply's metadata,
 	// and store the finished joke in D1 for the feed and the cache.
 	//
 	// "Ledger marks" are ours, not Flue's (src/lib/ledger.ts): a mark is the
 	// ledger's length at a moment, and `ledger.since(mark)` is what was paid
 	// after it. Two marks are taken. The conversation mark below lives in the
-	// in-memory hand-off and totals the whole run for the D1 row (write_joke
-	// and the finish hook both read it). The response mark in useResponseStart
-	// rides on the reply's metadata, which Flue persists in the record log, so
-	// useResponseFinish can list just that response's receipts. Both reset to
-	// zero if the Durable Object restarts mid-run; see the ledger header.
+	// in-memory hand-off; archivedPayments() joins what it covers with the
+	// conversation's durable x402.payment events for the D1 row (write_joke and
+	// the finish hook both call it). The response mark in useResponseStart rides
+	// on the reply's metadata, which Flue persists in the record log, so
+	// useResponseFinish can list just that response's receipts. Both marks reset
+	// to zero if the Durable Object restarts mid-run; see the ledger header.
 	useAgentStart(async () => {
 		handoff.setMark(id, ledger.mark());
 		conversationScope.set(id);
@@ -55,8 +63,8 @@ export function Joke({ id }: { id: string }) {
 			logEvent('agent.done', false, { reason: failedTools.length ? `tool failures: ${failedTools.join(', ')}` : 'finished without a joke' }, { conversationId: id, label: 'agent done' });
 			return;
 		}
-		const payments = ledger.since(handoff.takeMark(id));
-		const total = payments.reduce((sum, p) => sum + Number(p.authorizedUsdc), 0).toFixed(6);
+		const payments = await archivedPayments(id, { take: true });
+		const total = totalAuthorizedUsdc(payments);
 		// The hand-off plus whatever the events log has, in case a restart mid-run wiped the hand-off.
 		const steps = await archivedSteps(id, { take: true });
 		try {

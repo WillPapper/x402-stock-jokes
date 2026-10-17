@@ -11,6 +11,7 @@
  * filled in from there.
  */
 import { handoff } from './drafts.ts';
+import { ledger, mergePayments, paymentFromEvent, type PaymentRecord } from './ledger.ts';
 import { listEvents } from './log.ts';
 
 const STEP_OF: Record<string, string> = { fetch_stocktwits_signals: 'stocktwits', search_stock_news: 'ceramic', write_joke: 'joke' };
@@ -25,4 +26,17 @@ export async function archivedSteps(conversationId: string, opts: { take?: boole
 		if (key && !(key in merged) && e.data.output) merged[key] = e.data.output;
 	}
 	return Object.keys(merged).length ? merged : null;
+}
+
+/**
+ * Every payment this conversation made, for the D1 row: the durable
+ * `x402.payment` events joined with the in-memory ledger since the
+ * conversation's mark. Survives a Durable Object restart mid-run, which empties
+ * the ledger and resets the mark to 0 (see src/lib/ledger.ts).
+ */
+export async function archivedPayments(conversationId: string, opts: { take?: boolean } = {}): Promise<PaymentRecord[]> {
+	const memory = ledger.since(opts.take ? handoff.takeMark(conversationId) : handoff.mark(conversationId));
+	const events = await listEvents({ conversationId, kind: 'x402.payment', limit: 200, ascending: true }).catch(() => []);
+	const durable = events.map((e) => paymentFromEvent(e.ts, e.data)).filter((p): p is PaymentRecord => p !== null);
+	return mergePayments(durable, memory);
 }

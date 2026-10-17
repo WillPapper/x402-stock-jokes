@@ -58,6 +58,8 @@ export interface PaidResult {
 export interface ReceiptEvent extends PaidResult {
 	url: string;
 	scheme: string | null;
+	/** cf-ray of the final attempt, the same id the matching `x402.payment` event carries. */
+	ray: string | null;
 }
 
 /** One HTTP round trip inside a paid call, as seen on the wire. */
@@ -246,7 +248,7 @@ export function createPaidFetch(options: PaidFetchOptions) {
 			else budget.release(authorized);
 		}
 		last = { authorized, receipt, settled };
-		options.onReceipt?.({ ...last, url, scheme: receipt ? (receipt.scheme as string | undefined) ?? null : null });
+		options.onReceipt?.({ ...last, url, scheme: receipt ? (receipt.scheme as string | undefined) ?? null : null, ray: attempts.at(-1)?.ids['cf-ray'] ?? null });
 		emit(res.ok, res.status, res.ok ? undefined : `HTTP ${res.status}${attempts.at(-1)?.paymentRequired?.error ? ': ' + attempts.at(-1)!.paymentRequired!.error : ''}`);
 		return res;
 	}

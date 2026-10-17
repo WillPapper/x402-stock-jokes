@@ -4,9 +4,9 @@ import * as v from 'valibot';
 import { asJson } from '../lib/json.ts';
 import { config, paidInferenceFetch } from '../lib/env.ts';
 import { handoff } from '../lib/drafts.ts';
-import { archivedSteps } from '../lib/archive.ts';
+import { archivedPayments, archivedSteps } from '../lib/archive.ts';
 import { accessFor, insertJoke, jokeForConversation } from '../lib/db.ts';
-import { ledger, type PaymentRecord } from '../lib/ledger.ts';
+import { ledger, totalAuthorizedUsdc, type PaymentRecord } from '../lib/ledger.ts';
 import { logEvent } from '../lib/log.ts';
 import { factsFor, jokeMessages, type JokeInput } from '../lib/joke-prompt.ts';
 
@@ -104,7 +104,7 @@ export const writeJoke = (conversationId: string) =>
 		// payments and the archived steps.
 		try {
 			if (!(await jokeForConversation(conversationId))) {
-				const payments = ledger.since(handoff.mark(conversationId));
+				const payments = await archivedPayments(conversationId);
 				await insertJoke({
 					conversationId,
 					ticker: symbol,
@@ -112,7 +112,7 @@ export const writeJoke = (conversationId: string) =>
 					joke: result.joke,
 					facts,
 					payments,
-					totalAuthorizedUsdc: payments.reduce((sum, p) => sum + Number(p.authorizedUsdc), 0).toFixed(6),
+					totalAuthorizedUsdc: totalAuthorizedUsdc(payments),
 					orchestratorModel: config.orchestratorModel,
 					jokeModel: result.model,
 					paidBy: (await accessFor(conversationId).catch(() => null))?.paidBy ?? null,
