@@ -13,6 +13,7 @@
 import { createProvider } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import type { Model, ProviderStreams } from '@earendil-works/pi-ai';
+import { upstreamIds } from './upstream.ts';
 import type { createPaidFetch } from './x402.ts';
 
 export const X402_PROVIDER_ID = 'x402-ai-gateway';
@@ -139,13 +140,13 @@ export function createAiRunFetch(options: X402AiGatewayOptions): typeof fetch {
 		}
 		if (!res.ok || !envelope?.success || !envelope.result) {
 			const message = (envelope?.errors?.map((e) => `${e.code ?? ''} ${e.message ?? ''}`.trim()).join('; ') || text.slice(0, 300) || res.statusText) + ` [cf-ray ${res.headers.get('cf-ray') ?? '-'}]`;
-			options.onTurn?.({ model: String(model), status: res.status, ok: false, description: `failed: ${message} | ${options.paidFetch.describeLast()}`, ids: idsOf(res), durationMs: Date.now() - started, error: message });
+			options.onTurn?.({ model: String(model), status: res.status, ok: false, description: `failed: ${message} | ${options.paidFetch.describeLast()}`, ids: upstreamIds(res), durationMs: Date.now() - started, error: message });
 			return new Response(JSON.stringify({ error: { message: `AI Gateway /ai/run ${res.status}: ${message}`, type: 'ai_gateway_error' } }), {
 				status: res.ok ? 502 : res.status,
 				headers: { 'content-type': 'application/json' },
 			});
 		}
-		options.onTurn?.({ model: String(model), status: res.status, ok: true, usage: envelope.result.usage, description: options.paidFetch.describeLast(), ids: idsOf(res), durationMs: Date.now() - started, finishReason: envelope.result.choices?.[0]?.finish_reason ?? null });
+		options.onTurn?.({ model: String(model), status: res.status, ok: true, usage: envelope.result.usage, description: options.paidFetch.describeLast(), ids: upstreamIds(res), durationMs: Date.now() - started, finishReason: envelope.result.choices?.[0]?.finish_reason ?? null });
 		return new Response(completionToSse(envelope.result), { status: 200, headers: { 'content-type': 'text/event-stream' } });
 	};
 }
@@ -187,13 +188,4 @@ export function createX402AiGatewayProvider(options: X402AiGatewayOptions) {
 		models,
 		api,
 	});
-}
-
-function idsOf(res: Response): Record<string, string> {
-	const out: Record<string, string> = {};
-	for (const h of ['cf-ray', 'cf-aig-request-id', 'cf-aig-event-id', 'cf-aig-trace-id', 'cf-aig-log-id', 'cf-auditlog-id']) {
-		const v = res.headers.get(h);
-		if (v) out[h] = v;
-	}
-	return out;
 }

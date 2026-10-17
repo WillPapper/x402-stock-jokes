@@ -6,16 +6,19 @@
  *   settled; needs a one-time USDC.approve(Permit2) from the wallet).
  *
  * The wallet signer is wrapped so a `Budget` is consulted before anything is
- * signed. Receipts (`PAYMENT-RESPONSE`) are decoded and reported through
- * `onReceipt`, so callers can show Basescan links.
+ * signed. Every paid call ends with one `onPayment` event carrying the decoded
+ * receipt (`PAYMENT-RESPONSE`), the wire-level attempts and the identifiers
+ * Cloudflare support asks for; the callback is awaited before the response
+ * is returned, so a caller that persists it sees the row on return.
  */
 import { x402Client } from '@x402/core/client';
-import { basescanTxUrl } from './tx.ts';
 import { ExactEvmScheme } from '@x402/evm/exact/client';
 import { UptoEvmScheme } from '@x402/evm/upto/client';
 import { wrapFetchWithPayment } from '@x402/fetch';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import { Budget, BudgetExceededError, formatUsdc } from './budget.ts';
+import { basescanTxUrl } from './tx.ts';
+import { jwtPayload, upstreamIds } from './upstream.ts';
 
 export const BASE_MAINNET = 'eip155:8453';
 export const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
@@ -55,13 +58,6 @@ export interface PaidResult {
 	settled: boolean;
 }
 
-export interface ReceiptEvent extends PaidResult {
-	url: string;
-	scheme: string | null;
-	/** cf-ray of the final attempt, the same id the matching `x402.payment` event carries. */
-	ray: string | null;
-}
-
 /** One HTTP round trip inside a paid call, as seen on the wire. */
 export interface PaymentAttempt {
 	status: number;
@@ -86,6 +82,10 @@ export interface PaymentEvent {
 	scheme: string | null;
 	authorizedUsdc: string | null;
 	settled: boolean;
+	/** Decoded PAYMENT-RESPONSE of the final attempt, with the transaction hash when settled. */
+	receipt: Receipt | null;
+	/** cf-ray of the final attempt. */
+	ray: string | null;
 	payer: string;
 	attempts: PaymentAttempt[];
 	totalMs: number;
@@ -98,9 +98,8 @@ export interface PaidFetchOptions {
 	budget: Budget;
 	/** Dollar cap handed to the x402 client as a second line of defence, e.g. "$0.10". */
 	maxUsdPerPayment: string;
-	onReceipt?: (event: ReceiptEvent) => void;
-	/** Detailed per-call record for logs and bug reports. */
-	onEvent?: (event: PaymentEvent) => void;
+	/** Called once per paid call, after settlement is known and before the response is returned. */
+	onPayment?: (event: PaymentEvent) => void | Promise<void>;
 	label?: string;
 }
 
@@ -196,8 +195,8 @@ export function createPaidFetch(options: PaidFetchOptions) {
 		const attempt: PaymentAttempt = {
 			status: res.status,
 			durationMs: Date.now() - started,
-			ids: upstreamIdsOf(res),
-			paymentRequired: pr ? { error: pr.error, accepts: pr.accepts, quote: quoteToken ? jwtPayloadOf(quoteToken) : null } : null,
+			ids: upstreamIds(res),
+			paymentRequired: pr ? { error: pr.error, accepts: pr.accepts, quote: quoteToken ? jwtPayload(quoteToken) : null } : null,
 			signature: sig ? summarizeSignature(sig) : null,
 			paymentResponse: decodeReceipt(res.headers.get('PAYMENT-RESPONSE')),
 		};
@@ -214,8 +213,9 @@ export function createPaidFetch(options: PaidFetchOptions) {
 		const started = Date.now();
 		const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 		const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-		const emit = (ok: boolean, finalStatus: number, error?: string) =>
-			options.onEvent?.({
+		const emit = async (ok: boolean, finalStatus: number, error?: string) => {
+			if (!options.onPayment) return;
+			await options.onPayment({
 				label: options.label ?? url,
 				url,
 				method,
@@ -224,18 +224,21 @@ export function createPaidFetch(options: PaidFetchOptions) {
 				scheme: attempts.find((a) => a.paymentRequired?.accepts?.[0])?.paymentRequired?.accepts?.[0]?.scheme ?? null,
 				authorizedUsdc: pending === null ? null : formatUsdc(pending),
 				settled: last.settled,
+				receipt: last.receipt,
+				ray: attempts.at(-1)?.ids['cf-ray'] ?? null,
 				payer: account().address,
 				attempts,
 				totalMs: Date.now() - started,
 				...(error ? { error } : {}),
 			});
+		};
 		let res: Response;
 		try {
 			res = await fetchWithPayment()!(input as string, init);
 		} catch (err) {
 			if (pending !== null) budget.release(pending);
 			last = { authorized: pending, receipt: null, settled: false };
-			emit(false, attempts.at(-1)?.status ?? 0, (err as Error).message);
+			await emit(false, attempts.at(-1)?.status ?? 0, (err as Error).message);
 			throw err;
 		}
 		const receipt = decodeReceipt(res.headers.get('PAYMENT-RESPONSE'));
@@ -248,8 +251,7 @@ export function createPaidFetch(options: PaidFetchOptions) {
 			else budget.release(authorized);
 		}
 		last = { authorized, receipt, settled };
-		options.onReceipt?.({ ...last, url, scheme: receipt ? (receipt.scheme as string | undefined) ?? null : null, ray: attempts.at(-1)?.ids['cf-ray'] ?? null });
-		emit(res.ok, res.status, res.ok ? undefined : `HTTP ${res.status}${attempts.at(-1)?.paymentRequired?.error ? ': ' + attempts.at(-1)!.paymentRequired!.error : ''}`);
+		await emit(res.ok, res.status, res.ok ? undefined : `HTTP ${res.status}${attempts.at(-1)?.paymentRequired?.error ? ': ' + attempts.at(-1)!.paymentRequired!.error : ''}`);
 		return res;
 	}
 
@@ -262,24 +264,6 @@ export function createPaidFetch(options: PaidFetchOptions) {
 				? 'no payment'
 				: `${last.settled ? 'paid' : 'authorized (not settled)'} ${formatUsdc(last.authorized)} USDC${basescanTx(last.receipt) ? ' ' + basescanTx(last.receipt) : ''}`,
 	});
-}
-
-function upstreamIdsOf(res: Response): Record<string, string> {
-	const out: Record<string, string> = {};
-	for (const h of ['cf-ray', 'cf-aig-request-id', 'cf-aig-event-id', 'cf-aig-trace-id', 'cf-aig-log-id', 'cf-auditlog-id', 'api-version', 'x-request-id', 'date']) {
-		const v = res.headers.get(h);
-		if (v) out[h] = v;
-	}
-	return out;
-}
-
-function jwtPayloadOf(token: string): Record<string, unknown> | null {
-	try {
-		const part = token.split('.')[1] ?? '';
-		return JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/').padEnd(part.length + ((4 - (part.length % 4)) % 4), '='))) as Record<string, unknown>;
-	} catch {
-		return null;
-	}
 }
 
 /** The PAYMENT-SIGNATURE we sent, minus the signature bytes: enough to trace a payment on the seller side. */

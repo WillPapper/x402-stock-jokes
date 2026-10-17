@@ -3,9 +3,9 @@ import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { asJson } from '../lib/json.ts';
 import { paidDataFetch } from '../lib/env.ts';
-import { handoff } from '../lib/drafts.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 import { logEvent } from '../lib/log.ts';
+import { setStep, stepOutput } from '../lib/runs.ts';
 import { buildNewsQueries, companyKeyword, rankNews, type DropReason, type NewsItem, type RawNews } from '../lib/news.ts';
 import { decodePaymentRequired } from '../lib/x402.ts';
 
@@ -29,8 +29,8 @@ export interface NewsSearch {
 }
 
 /** One paid Ceramic query, 20 results, short snippets. */
-export async function ceramicQuery(query: string, maxResults = 20): Promise<RawNews[]> {
-	const paid = paidDataFetch(`Ceramic search "${query.slice(0, 40)}"`);
+export async function ceramicQuery(query: string, maxResults = 20, conversationId?: string): Promise<RawNews[]> {
+	const paid = paidDataFetch(`Ceramic search "${query.slice(0, 40)}"`, conversationId);
 	const res = await paid(CERAMIC_SEARCH_URL, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
@@ -50,16 +50,18 @@ export async function ceramicQuery(query: string, maxResults = 20): Promise<RawN
  * listicles and quote pages, and rank dated company events first. Queries run
  * one after another because the paid fetch tracks one pending payment at a time.
  */
-export async function searchNewsFor(symbol: string, companyTitle?: string | null, limit = 6): Promise<NewsSearch> {
+export async function searchNewsFor(symbol: string, companyTitle?: string | null, limit = 6, conversationId?: string): Promise<NewsSearch> {
 	const mark = ledger.mark();
 	const sym = symbol.toUpperCase();
-	const company = companyKeyword(companyTitle ?? handoff.title(sym), sym);
+	// When the orchestrator leaves the company out, take it from the StockTwits step of this run.
+	const title = companyTitle ?? (conversationId ? (await stepOutput<{ title?: string | null }>(conversationId, 'stocktwits'))?.title : null);
+	const company = companyKeyword(title, sym);
 	const queries = buildNewsQueries(company, sym);
 	const raw: RawNews[] = [];
 	const failures: string[] = [];
 	for (const q of queries) {
 		try {
-			raw.push(...(await ceramicQuery(q)));
+			raw.push(...(await ceramicQuery(q, 20, conversationId)));
 		} catch (err) {
 			failures.push(`${q}: ${(err as Error).message}`);
 		}
@@ -109,14 +111,17 @@ export const searchStockNews = (conversationId: string) =>
 	durable: true,
 	async run({ data, step, log }) {
 		logEvent('tool.start', true, { tool: 'search_stock_news', input: data }, { conversationId, label: 'search_stock_news' });
+		await setStep(conversationId, 'search_stock_news', 'running');
 		try {
-		const news = await step.do(`ceramic:${data.symbol.toUpperCase()}`, () => searchNewsFor(data.symbol, data.company));
-		handoff.setStep(conversationId, 'ceramic', news);
-		log.info(`Ceramic: ${news.results.length} of ${news.rawCount} results kept for ${news.company} (${news.queries.length} queries, ${news.payments.length} payment(s))`);
-		logEvent('tool.done', true, { tool: 'search_stock_news', output: news }, { conversationId, label: 'search_stock_news' });
-		return { output: asJson(newsForModel(news)) };
+			const news = await step.do(`ceramic:${data.symbol.toUpperCase()}`, () => searchNewsFor(data.symbol, data.company, 6, conversationId));
+			await setStep(conversationId, 'search_stock_news', 'done', { output: news });
+			log.info(`Ceramic: ${news.results.length} of ${news.rawCount} results kept for ${news.company} (${news.queries.length} queries, ${news.payments.length} payment(s))`);
+			logEvent('tool.done', true, { tool: 'search_stock_news', company: news.company, kept: news.results.length, rawCount: news.rawCount, newestDate: news.newestDate, payments: news.payments.length }, { conversationId, label: 'search_stock_news' });
+			return { output: asJson(newsForModel(news)) };
 		} catch (err) {
-			logEvent('tool.error', false, { tool: 'search_stock_news', error: (err as Error).message.slice(0, 400) }, { conversationId, label: 'search_stock_news' });
+			const error = (err as Error).message.slice(0, 400);
+			logEvent('tool.error', false, { tool: 'search_stock_news', error }, { conversationId, label: 'search_stock_news' });
+			await setStep(conversationId, 'search_stock_news', 'error', { error });
 			throw err;
 		}
 	},

@@ -1,13 +1,12 @@
 'use agent';
 import { useAgentFinish, useAgentStart, useModel, useResponseFinish, useResponseStart, useTool } from '@flue/runtime';
 import { X402_PROVIDER_ID } from '../lib/ai-gateway-provider.ts';
-import { archivedPayments, archivedSteps } from '../lib/archive.ts';
-import { accessFor, completeJoke, insertJoke, jokeForConversation } from '../lib/db.ts';
-import { handoff } from '../lib/drafts.ts';
+import { whereAmI } from '../lib/colo.ts';
 import { config } from '../lib/env.ts';
 import { ledger, totalAuthorizedUsdc } from '../lib/ledger.ts';
 import { conversationScope, logEvent } from '../lib/log.ts';
-import { whereAmI } from '../cloudflare.ts';
+import { persistJoke } from '../lib/persist.ts';
+import { finishRun, markRunning } from '../lib/runs.ts';
 import { searchStockNews } from '../tools/ceramic.ts';
 import { writeJoke } from '../tools/joke.ts';
 import { fetchStocktwitsSignals } from '../tools/stocktwits.ts';
@@ -16,91 +15,54 @@ import { fetchStocktwitsSignals } from '../tools/stocktwits.ts';
 // class (FlueJokeAgent) and the migration entry in wrangler.jsonc.
 export function Joke({ id }: { id: string }) {
 	// Every turn of this model is itself paid with x402 through AI Gateway
-	// machine payments (see src/lib/ai-gateway-provider.ts, registered in app.ts).
+	// machine payments (see src/lib/ai-gateway-provider.ts, registered in cloudflare.ts).
 	useModel(`${X402_PROVIDER_ID}/${config.orchestratorModel}`);
 
 	useTool(fetchStocktwitsSignals(id));
 	useTool(searchStockNews(id));
 	useTool(writeJoke(id));
 
-	// The render runs before every model turn, including the first turn after a
-	// Durable Object restart, when useAgentStart does not run again. Setting the
-	// log scope here keeps the resumed run's payment events tagged with this
-	// conversation (a Nintendo run's post-restart payments were logged with no
-	// conversation id, 2026-10-17). A module-level variable, not Flue state.
+	// The orchestrator's own paid turns are made by the provider, which knows no
+	// conversation; this scope tags them. The render runs before every model
+	// turn, including the first after a Durable Object restart (when
+	// useAgentStart does not run again), so the tag survives a resume.
 	conversationScope.set(id);
 
-	// Attach every payment made during this response to the reply's metadata,
-	// and store the finished joke in D1 for the feed and the cache.
-	//
-	// "Ledger marks" are ours, not Flue's (src/lib/ledger.ts): a mark is the
-	// ledger's length at a moment, and `ledger.since(mark)` is what was paid
-	// after it. Two marks are taken. The conversation mark below lives in the
-	// in-memory hand-off; archivedPayments() joins what it covers with the
-	// conversation's durable x402.payment events for the D1 row (write_joke and
-	// the finish hook both call it). The response mark in useResponseStart rides
-	// on the reply's metadata, which Flue persists in the record log, so
-	// useResponseFinish can list just that response's receipts. Both marks reset
-	// to zero if the Durable Object restarts mid-run; see the ledger header.
-	useAgentStart(async () => {
-		handoff.setMark(id, ledger.mark());
-		conversationScope.set(id);
+	useAgentStart(async ({ log }) => {
+		await markRunning(id).catch((err) => log.warn(`markRunning failed: ${(err as Error).message}`));
 		const where = await whereAmI();
 		logEvent('gate', where.loc === 'US', { probe: 'agent', agentColo: where.colo, agentCountry: where.loc }, { conversationId: id, label: 'agent colo' });
 	});
+
+	// Receipts for the reply's metadata: what this isolate paid during this
+	// response. Cosmetic (the run's durable payments are in D1), and in memory
+	// because these hooks must be synchronous.
 	useResponseStart(() => ({ ledgerMark: ledger.mark() }));
 	useResponseFinish(({ metadata }) => {
-		const mark = typeof (metadata as { ledgerMark?: unknown })?.ledgerMark === 'number' ? (metadata as { ledgerMark: number }).ledgerMark : 0;
+		const mark = typeof metadata.ledgerMark === 'number' ? metadata.ledgerMark : 0;
 		const payments = ledger.since(mark);
-		const authorized = payments.reduce((sum, p) => sum + Number(p.authorizedUsdc), 0);
-		return { payments, totalAuthorizedUsdc: authorized.toFixed(6) };
+		return { payments, totalAuthorizedUsdc: totalAuthorizedUsdc(payments) };
 	});
+
+	// Close the run: the joke row was written by write_joke, so top it up with
+	// the closing turn's payments and the step archive; without a joke, record why.
 	useAgentFinish(async ({ log, response }) => {
 		const failedTools = response.toolCalls.filter((t) => t.isError).map((t) => t.tool);
 		if (failedTools.length) logEvent('error', false, { where: 'agent-finish', failedTools, toolCalls: response.toolCalls.length }, { conversationId: id, label: 'tool failures' });
-		const draft = handoff.takeDraft(id);
-		const payments = await archivedPayments(id, { take: true });
-		const total = totalAuthorizedUsdc(payments);
-		// The hand-off plus whatever the events log has, in case a restart mid-run wiped the hand-off.
-		const steps = await archivedSteps(id, { take: true });
-		if (!draft) {
-			// No draft in memory, but write_joke may still have stored the row before a
-			// Durable Object restart wiped the hand-off (a Disney run finished this way,
-			// 2026-10-17: the row kept 8 of its 10 payments). Finish that row from the
-			// durable events instead of declaring the run joke-less.
-			const stored = await jokeForConversation(id).catch(() => null);
-			if (stored && (await completeJoke(id, { payments, totalAuthorizedUsdc: total, steps }).catch(() => false))) {
-				log.info(`completed joke for ${stored.ticker} after a restart (${payments.length} payments, ${total} USDC authorized)`);
-				logEvent('agent.done', true, { ticker: stored.ticker, payments: payments.length, resumed: true }, { conversationId: id, label: 'agent done' });
-				return;
-			}
-			logEvent('agent.done', false, { reason: failedTools.length ? `tool failures: ${failedTools.join(', ')}` : 'finished without a joke' }, { conversationId: id, label: 'agent done' });
-			return;
-		}
 		try {
-			// write_joke already stored the row; add the closing turn's payments and the full step archive.
-			if (await completeJoke(id, { payments, totalAuthorizedUsdc: total, steps })) {
-				log.info(`completed joke for ${draft.symbol} (${payments.length} payments, ${total} USDC authorized)`);
-				logEvent('agent.done', true, { ticker: draft.symbol, payments: payments.length }, { conversationId: id, label: 'agent done' });
+			const stored = await persistJoke(id);
+			if (stored.outcome === 'none') {
+				const reason = failedTools.length ? `tool failures: ${failedTools.join(', ')}` : stored.reason;
+				await finishRun(id, { state: 'failed', error: reason });
+				logEvent('agent.done', false, { reason }, { conversationId: id, label: 'agent done' });
 				return;
 			}
-			const row = await insertJoke({
-				conversationId: id,
-				ticker: draft.symbol,
-				title: handoff.title(draft.symbol),
-				joke: draft.joke,
-				facts: draft.facts,
-				payments,
-				totalAuthorizedUsdc: total,
-				orchestratorModel: config.orchestratorModel,
-				jokeModel: draft.model,
-				paidBy: (await accessFor(id).catch(() => null))?.paidBy ?? null,
-				steps,
-			});
-			log.info(`stored joke ${row.id} for ${row.ticker} (${payments.length} payments, ${total} USDC authorized)`);
-			logEvent('agent.done', true, { jokeId: row.id, ticker: row.ticker, payments: payments.length }, { conversationId: id, label: 'agent done' });
+			await finishRun(id, { state: 'done' });
+			log.info(`${stored.outcome} joke for ${stored.ticker}`);
+			logEvent('agent.done', true, { ticker: stored.ticker, stored: stored.outcome }, { conversationId: id, label: 'agent done' });
 		} catch (err) {
-			log.error(`failed to store joke: ${(err as Error).message}`);
+			log.error(`failed to close the run: ${(err as Error).message}`);
+			logEvent('error', false, { where: 'agent-finish', error: (err as Error).message.slice(0, 300) }, { conversationId: id, label: 'finish failed' });
 		}
 	});
 

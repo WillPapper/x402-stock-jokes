@@ -1,6 +1,13 @@
-/** D1 persistence for finished jokes: the feed, per-ticker cache, and stats. */
+/** D1 persistence for finished jokes: the feed, per-ticker cache, and stats. Runs live in src/lib/runs.ts. */
 import { env } from 'cloudflare:workers';
 import type { PaymentRecord } from './ledger.ts';
+import { redactAccountIds } from './redact.ts';
+
+/** What a joke cost on-chain, computed once from the wallet's transfers (src/lib/settlement.ts). */
+export interface Settled {
+	paid: { exactUsdc: number; exactCount: number; aiUsdc: number; aiCount: number; totalUsdc: number };
+	buyer: { usdc: number; from: string; tx: string | null; at: string } | null;
+}
 
 export interface JokeRow {
 	id: string;
@@ -16,6 +23,8 @@ export interface JokeRow {
 	paidBy: 'password' | 'x402' | null;
 	/** Full tool outputs: { stocktwits, ceramic, joke }. */
 	steps: Record<string, unknown> | null;
+	/** Null until the chain has been consulted for this joke. */
+	settled: Settled | null;
 	createdAt: string;
 }
 
@@ -32,6 +41,7 @@ interface RawRow {
 	joke_model: string | null;
 	paid_by: string | null;
 	steps: string | null;
+	settled: string | null;
 	created_at: string;
 }
 
@@ -42,6 +52,9 @@ function db(): D1Database {
 }
 
 function parse(r: RawRow): JokeRow {
+	// Rows written before 2026-10-17 carry the Cloudflare account id inside AI
+	// Gateway URLs and no `ok` flag on their payments; new rows are written clean.
+	const payments = redactAccountIds(JSON.parse(r.payments) as (PaymentRecord & { ok?: boolean })[]).map((p) => ({ ...p, ok: p.ok ?? true }));
 	return {
 		id: r.id,
 		conversationId: r.conversation_id,
@@ -49,18 +62,19 @@ function parse(r: RawRow): JokeRow {
 		title: r.title,
 		joke: r.joke,
 		facts: JSON.parse(r.facts) as string[],
-		payments: JSON.parse(r.payments) as PaymentRecord[],
+		payments,
 		totalAuthorizedUsdc: r.total_authorized_usdc,
 		orchestratorModel: r.orchestrator_model,
 		jokeModel: r.joke_model,
 		paidBy: (r.paid_by as JokeRow['paidBy']) ?? null,
-		steps: r.steps ? (JSON.parse(r.steps) as Record<string, unknown>) : null,
+		steps: r.steps ? redactAccountIds(JSON.parse(r.steps) as Record<string, unknown>) : null,
+		settled: r.settled ? (JSON.parse(r.settled) as Settled) : null,
 		createdAt: r.created_at,
 	};
 }
 
-export async function insertJoke(row: Omit<JokeRow, 'id' | 'createdAt'> & { id?: string; createdAt?: string }): Promise<JokeRow> {
-	const full: JokeRow = { ...row, id: row.id ?? crypto.randomUUID(), createdAt: row.createdAt ?? new Date().toISOString() };
+export async function insertJoke(row: Omit<JokeRow, 'id' | 'createdAt' | 'settled'> & { id?: string; createdAt?: string }): Promise<JokeRow> {
+	const full: JokeRow = { ...row, settled: null, id: row.id ?? crypto.randomUUID(), createdAt: row.createdAt ?? new Date().toISOString() };
 	await db()
 		.prepare(
 			`INSERT INTO jokes (id, conversation_id, ticker, title, joke, facts, payments, total_authorized_usdc, orchestrator_model, joke_model, paid_by, steps, created_at)
@@ -71,13 +85,17 @@ export async function insertJoke(row: Omit<JokeRow, 'id' | 'createdAt'> & { id?:
 	return full;
 }
 
-/** Finish a row written by write_joke: the agent's closing turn adds its own payments and the archived steps. */
+/** Finish a row written by write_joke: the agent's closing turn adds its own payments and the full step archive. */
 export async function completeJoke(conversationId: string, patch: { payments: PaymentRecord[]; totalAuthorizedUsdc: string; steps: Record<string, unknown> | null }): Promise<boolean> {
 	const res = await db()
 		.prepare('UPDATE jokes SET payments = ?2, total_authorized_usdc = ?3, steps = COALESCE(?4, steps) WHERE conversation_id = ?1')
 		.bind(conversationId, JSON.stringify(patch.payments), patch.totalAuthorizedUsdc, patch.steps ? JSON.stringify(patch.steps) : null)
 		.run();
 	return (res.meta?.changes ?? 0) > 0;
+}
+
+export async function saveSettled(jokeId: string, settled: Settled): Promise<void> {
+	await db().prepare('UPDATE jokes SET settled = ?2 WHERE id = ?1').bind(jokeId, JSON.stringify(settled)).run();
 }
 
 /**
@@ -109,9 +127,6 @@ export async function latestJokeFor(ticker: string): Promise<JokeRow | null> {
 export interface JokeStats {
 	count: number;
 	tickers: number;
-	/** Sum of the x402 payments buyers made to this app, from the gateway's PAYMENT-CONTEXT tokens. */
-	earnedFromJokesUsdc: string;
-	paidJokes: number;
 	/** Jokes per hour for the last 24 hours, oldest first; `hour` is an ISO timestamp truncated to the hour. */
 	perHour: { hour: string; count: number }[];
 	latestAt: string | null;
@@ -119,42 +134,14 @@ export interface JokeStats {
 
 export async function jokeStats(): Promise<JokeStats> {
 	const totals = await db().prepare('SELECT COUNT(*) AS count, COUNT(DISTINCT ticker) AS tickers, MAX(created_at) AS latest FROM jokes').first<{ count: number; tickers: number; latest: string | null }>();
-	const earned = await db().prepare("SELECT COUNT(*) AS n, COALESCE(SUM(CAST(amount_usdc AS REAL)), 0) AS total FROM access WHERE paid_by = 'x402'").first<{ n: number; total: number }>();
 	const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
 	const { results } = await db().prepare("SELECT substr(created_at, 1, 13) || ':00:00Z' AS hour, COUNT(*) AS count FROM jokes WHERE created_at > ?1 GROUP BY hour ORDER BY hour ASC").bind(since).all<{ hour: string; count: number }>();
 	return {
 		count: totals?.count ?? 0,
 		tickers: totals?.tickers ?? 0,
-		earnedFromJokesUsdc: (earned?.total ?? 0).toFixed(6),
-		paidJokes: earned?.n ?? 0,
 		perHour: results,
 		latestAt: totals?.latest ?? null,
 	};
-}
-
-export async function recordAccess(conversationId: string, paidBy: 'password' | 'x402', amountBaseUnits?: string): Promise<void> {
-	const amount = amountBaseUnits ? (Number(amountBaseUnits) / 1e6).toFixed(6) : null;
-	await db()
-		.prepare('INSERT INTO access (conversation_id, paid_by, amount_usdc, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(conversation_id) DO UPDATE SET paid_by = excluded.paid_by, amount_usdc = excluded.amount_usdc')
-		.bind(conversationId, paidBy, amount, new Date().toISOString())
-		.run();
-}
-
-/** When each of these conversations was admitted by an x402 payment (conversation id → ISO time). */
-export async function x402AccessTimes(conversationIds: string[]): Promise<Map<string, string>> {
-	const out = new Map<string, string>();
-	for (let i = 0; i < conversationIds.length; i += 50) {
-		const chunk = conversationIds.slice(i, i + 50);
-		const marks = chunk.map((_, k) => `?${k + 1}`).join(', ');
-		const { results } = await db().prepare(`SELECT conversation_id, created_at FROM access WHERE paid_by = 'x402' AND conversation_id IN (${marks})`).bind(...chunk).all<{ conversation_id: string; created_at: string }>();
-		for (const r of results) out.set(r.conversation_id, r.created_at);
-	}
-	return out;
-}
-
-export async function accessFor(conversationId: string): Promise<{ paidBy: 'password' | 'x402'; amountUsdc: string | null } | null> {
-	const r = await db().prepare('SELECT paid_by, amount_usdc FROM access WHERE conversation_id = ?1').bind(conversationId).first<{ paid_by: string; amount_usdc: string | null }>();
-	return r ? { paidBy: r.paid_by as 'password' | 'x402', amountUsdc: r.amount_usdc } : null;
 }
 
 /**

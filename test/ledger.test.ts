@@ -1,64 +1,44 @@
 import { describe, expect, test } from 'bun:test';
-import { mergePayments, paymentFromEvent, totalAuthorizedUsdc, type PaymentRecord } from '../src/lib/ledger.ts';
+import { paymentRecord, totalAuthorizedUsdc } from '../src/lib/ledger.ts';
+import type { PaymentEvent } from '../src/lib/x402.ts';
 
-const exactEvent = {
+const base: PaymentEvent = {
 	label: 'Ceramic search "Nintendo stock news"',
 	url: 'https://api.ceramic.ai/search',
+	method: 'POST',
 	ok: true,
+	finalStatus: 200,
 	scheme: 'exact',
 	authorizedUsdc: '0.001000',
 	settled: true,
-	attempts: [
-		{ status: 402, ids: { 'cf-ray': 'ray-1' }, paymentResponse: null },
-		{ status: 200, ids: { 'cf-ray': 'ray-2' }, paymentResponse: { success: true, transaction: '0x' + 'ab'.repeat(32), network: 'eip155:8453' } },
-	],
+	receipt: { success: true, transaction: '0x' + 'ab'.repeat(32), network: 'eip155:8453' },
+	ray: 'ray-2',
+	payer: '0xpayer',
+	attempts: [],
+	totalMs: 900,
 };
 
-const uptoEvent = {
-	label: 'AI Gateway orchestrator turn',
-	url: 'https://api.cloudflare.com/client/v4/accounts/x/ai/run',
-	ok: false,
-	scheme: 'upto',
-	authorizedUsdc: '0.131072',
-	settled: false,
-	attempts: [{ status: 504, ids: { 'cf-ray': 'ray-3' }, paymentResponse: null }],
-};
-
-describe('paymentFromEvent', () => {
-	test('rebuilds a ledger record from an exact payment event', () => {
-		const p = paymentFromEvent('2026-10-17T05:20:39.347Z', exactEvent);
-		expect(p).toMatchObject({ at: '2026-10-17T05:20:39.347Z', label: exactEvent.label, url: exactEvent.url, scheme: 'exact', authorizedUsdc: '0.001000', settled: true, ray: 'ray-2' });
-		expect(p?.tx).toContain('ab'.repeat(32));
+describe('paymentRecord', () => {
+	test('builds a record from an exact payment, with the Basescan link', () => {
+		const p = paymentRecord(base.label, base);
+		expect(p).toMatchObject({ label: base.label, url: base.url, scheme: 'exact', authorizedUsdc: '0.001000', settled: true, ok: true, ray: 'ray-2' });
+		expect(p?.tx).toBe(`https://basescan.org/tx/0x${'ab'.repeat(32)}`);
 	});
 	test('keeps an authorized but failed upto turn, unsettled and without a tx', () => {
-		const p = paymentFromEvent('2026-10-17T05:25:43.169Z', uptoEvent);
-		expect(p).toMatchObject({ scheme: 'upto', authorizedUsdc: '0.131072', settled: false, tx: null, ray: 'ray-3' });
+		const p = paymentRecord('AI Gateway orchestrator turn', { ...base, url: 'https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/run', ok: false, finalStatus: 504, scheme: 'upto', authorizedUsdc: '0.131072', settled: false, receipt: null, ray: 'ray-3' });
+		expect(p).toMatchObject({ scheme: 'upto', authorizedUsdc: '0.131072', settled: false, ok: false, tx: null, ray: 'ray-3' });
+	});
+	test('strips the Cloudflare account id from the stored URL', () => {
+		const p = paymentRecord('turn', { ...base, url: 'https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/run', scheme: null });
+		expect(p?.url).toBe('https://api.cloudflare.com/client/v4/accounts/<account>/ai/run');
+		expect(p?.scheme).toBe('upto');
 	});
 	test('skips a free call', () => {
-		expect(paymentFromEvent('2026-10-17T05:20:00.276Z', { ...exactEvent, authorizedUsdc: null })).toBeNull();
+		expect(paymentRecord('free', { ...base, authorizedUsdc: null })).toBeNull();
 	});
-});
-
-describe('mergePayments', () => {
-	const durable = [paymentFromEvent('2026-10-17T05:20:39.347Z', exactEvent)!, paymentFromEvent('2026-10-17T05:25:43.169Z', uptoEvent)!];
-	const mem = (over: Partial<PaymentRecord>): PaymentRecord => ({ at: '2026-10-17T05:28:52.771Z', label: 'AI Gateway orchestrator turn', url: uptoEvent.url, scheme: 'upto', authorizedUsdc: '0.131072', settled: false, tx: null, ray: 'ray-9', ...over });
-
-	test('drops an in-memory record the events already have, by cf-ray', () => {
-		const merged = mergePayments(durable, [mem({ at: '2026-10-17T05:25:43.900Z', ray: 'ray-3' })]);
-		expect(merged).toHaveLength(2);
-	});
-	test('matches on url, amount and time when a cf-ray is missing', () => {
-		const merged = mergePayments(durable, [mem({ at: '2026-10-17T05:25:45.000Z', ray: null })]);
-		expect(merged).toHaveLength(2);
-		const later = mergePayments(durable, [mem({ at: '2026-10-17T05:25:50.000Z', ray: null })]);
-		expect(later).toHaveLength(3);
-	});
-	test('adds the closing turn the event write has not landed yet, sorted by time', () => {
-		const merged = mergePayments(durable, [mem({})]);
-		expect(merged.map((p) => p.at)).toEqual(['2026-10-17T05:20:39.347Z', '2026-10-17T05:25:43.169Z', '2026-10-17T05:28:52.771Z']);
-		expect(totalAuthorizedUsdc(merged)).toBe('0.263144');
-	});
-	test('works with no events at all (D1 unavailable)', () => {
-		expect(mergePayments([], [mem({})])).toHaveLength(1);
+	test('totals authorized amounts to six decimals', () => {
+		const a = paymentRecord('a', base)!;
+		const b = paymentRecord('b', { ...base, authorizedUsdc: '0.131072' })!;
+		expect(totalAuthorizedUsdc([a, b])).toBe('0.132072');
 	});
 });

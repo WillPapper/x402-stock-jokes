@@ -13,9 +13,9 @@ import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 import { asJson } from '../lib/json.ts';
 import { paidDataFetch } from '../lib/env.ts';
-import { handoff } from '../lib/drafts.ts';
 import { ledger, type PaymentRecord } from '../lib/ledger.ts';
 import { logEvent } from '../lib/log.ts';
+import { setStep } from '../lib/runs.ts';
 import { decodePaymentRequired } from '../lib/x402.ts';
 
 export const STOCKTWITS_GATEWAY = 'https://api-staging-mgw.stocktwits.com';
@@ -161,17 +161,16 @@ async function describeFailure(res: Response): Promise<string> {
 	return `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`;
 }
 
-export async function fetchStocktwitsSignalsFor(symbol: string): Promise<StocktwitsSignals> {
+export async function fetchStocktwitsSignalsFor(symbol: string, conversationId?: string): Promise<StocktwitsSignals> {
 	const sym = symbol.toUpperCase().replace(/[^A-Z0-9.]/g, '');
 	const mark = ledger.mark();
-	const paid = paidDataFetch(`StockTwits symbols/show/${sym}`);
+	const paid = paidDataFetch(`StockTwits symbols/show/${sym}`, conversationId);
 
 	const showRes = await paid(`${STOCKTWITS_GATEWAY}/api/2/symbols/show/${sym}.json`);
 	if (!showRes.ok) throw new Error(`StockTwits symbol lookup for ${sym} failed: ${await describeFailure(showRes)}`);
 	const show = (await showRes.json()) as ShowResponse;
-	if (show.symbol?.title) handoff.setTitle(sym, show.symbol.title);
 
-	const free = paidDataFetch(`StockTwits streams/symbol/${sym} (free)`);
+	const free = paidDataFetch(`StockTwits streams/symbol/${sym} (free)`, conversationId);
 	const streamRes = await free(`${STOCKTWITS_GATEWAY}/api/2/streams/symbol/${sym}.json`);
 	const stream: StreamResponse = streamRes.ok ? ((await streamRes.json()) as StreamResponse) : {};
 	const messages = stream.messages ?? [];
@@ -237,14 +236,18 @@ export const fetchStocktwitsSignals = (conversationId: string) =>
 	durable: true,
 	async run({ data, step, log }) {
 		logEvent('tool.start', true, { tool: 'fetch_stocktwits_signals', input: data }, { conversationId, label: 'fetch_stocktwits_signals' });
+		await setStep(conversationId, 'fetch_stocktwits_signals', 'running');
 		try {
-		const signals = await step.do(`stocktwits:${data.symbol.toUpperCase()}`, () => fetchStocktwitsSignalsFor(data.symbol));
-		handoff.setStep(conversationId, 'stocktwits', signals);
-		log.info(`StockTwits ${signals.symbol}: ${signals.mood}, latest ${signals.latestPrice ?? 'n/a'}, ${signals.quotes.length} quotes; ${signals.payments.length} payment(s)`);
-		logEvent('tool.done', true, { tool: 'fetch_stocktwits_signals', output: signals }, { conversationId, label: 'fetch_stocktwits_signals' });
-		return { output: asJson(signalsForModel(signals)) };
+			const signals = await step.do(`stocktwits:${data.symbol.toUpperCase()}`, () => fetchStocktwitsSignalsFor(data.symbol, conversationId));
+			// The full output goes to the run row: the page's "under the hood" panel and the joke's archive read it there.
+			await setStep(conversationId, 'fetch_stocktwits_signals', 'done', { output: signals });
+			log.info(`StockTwits ${signals.symbol}: ${signals.mood}, latest ${signals.latestPrice ?? 'n/a'}, ${signals.quotes.length} quotes; ${signals.payments.length} payment(s)`);
+			logEvent('tool.done', true, { tool: 'fetch_stocktwits_signals', symbol: signals.symbol, title: signals.title, payments: signals.payments.length }, { conversationId, label: 'fetch_stocktwits_signals' });
+			return { output: asJson(signalsForModel(signals)) };
 		} catch (err) {
-			logEvent('tool.error', false, { tool: 'fetch_stocktwits_signals', error: (err as Error).message.slice(0, 400) }, { conversationId, label: 'fetch_stocktwits_signals' });
+			const error = (err as Error).message.slice(0, 400);
+			logEvent('tool.error', false, { tool: 'fetch_stocktwits_signals', error }, { conversationId, label: 'fetch_stocktwits_signals' });
+			await setStep(conversationId, 'fetch_stocktwits_signals', 'error', { error });
 			throw err;
 		}
 	},

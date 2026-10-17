@@ -1,9 +1,10 @@
 import { env } from 'cloudflare:workers';
 import type { GatewayPayments } from './alchemy.ts';
 import { Budget, usdToBaseUnits } from './budget.ts';
+import { ledger, paymentRecord } from './ledger.ts';
+import { conversationScope, logEvent } from './log.ts';
+import { addRunPayment } from './runs.ts';
 import { createPaidFetch } from './x402.ts';
-import { ledger } from './ledger.ts';
-import { logEvent } from './log.ts';
 
 interface Bindings {
 	CLOUDFLARE_ACCOUNT_ID: string;
@@ -84,7 +85,10 @@ export const config = {
 	},
 };
 
-let budgets: { data: Budget; inference: Budget; alchemy: Budget } | null = null;
+/** The three kinds of paid call, each with its own per-payment cap and shared per-isolate cap. */
+export type PaidKind = 'data' | 'inference' | 'alchemy';
+
+let budgets: Record<PaidKind, Budget> | null = null;
 /** Caps shared by every payment this isolate makes; created on first use. */
 export function getBudgets() {
 	return (budgets ??= {
@@ -94,36 +98,37 @@ export function getBudgets() {
 	});
 }
 
-export function paidDataFetch(label: string) {
+const perPaymentCap: Record<PaidKind, () => string> = {
+	data: () => config.maxUsdPerDataCall,
+	inference: () => config.maxUsdPerInference,
+	alchemy: () => config.maxUsdPerAlchemyTopup,
+};
+
+/**
+ * A fetch that pays x402 challenges from the app wallet. Every completed
+ * payment is logged as an `x402.payment` event and, when it belongs to a run,
+ * stored in `run_payments` before the response is returned. Tools pass their
+ * conversation id; the orchestrator's own turns (made by the pi-ai provider,
+ * which knows no conversation) fall back to the agent's log scope.
+ */
+export function paidFetch(kind: PaidKind, label: string, conversationId?: string | null) {
 	return createPaidFetch({
 		privateKey: () => config.privateKey,
-		budget: getBudgets().data,
-		maxUsdPerPayment: `$${config.maxUsdPerDataCall}`,
+		budget: getBudgets()[kind],
+		maxUsdPerPayment: `$${perPaymentCap[kind]()}`,
 		label,
-		onReceipt: (ev) => ledger.record(label, ev),
-		onEvent: (ev) => logEvent('x402.payment', ev.ok, ev as unknown as Record<string, unknown>, { label }),
+		onPayment: async (ev) => {
+			const id = conversationId ?? conversationScope.get();
+			logEvent('x402.payment', ev.ok, ev as unknown as Record<string, unknown>, { label, conversationId: id });
+			const rec = paymentRecord(label, ev);
+			if (!rec) return;
+			ledger.record(rec);
+			if (id) await addRunPayment(id, rec).catch((err) => console.warn('run payment persist failed', (err as Error).message.slice(0, 120)));
+		},
 	});
 }
 
+export const paidDataFetch = (label: string, conversationId?: string | null) => paidFetch('data', label, conversationId);
+export const paidInferenceFetch = (label: string, conversationId?: string | null) => paidFetch('inference', label, conversationId);
 /** Pays Alchemy's x402 gateway for credits when the free-plan key is out of capacity (src/lib/alchemy.ts). */
-export function paidAlchemyFetch(label: string) {
-	return createPaidFetch({
-		privateKey: () => config.privateKey,
-		budget: getBudgets().alchemy,
-		maxUsdPerPayment: `$${config.maxUsdPerAlchemyTopup}`,
-		label,
-		onReceipt: (ev) => ledger.record(label, ev),
-		onEvent: (ev) => logEvent('x402.payment', ev.ok, ev as unknown as Record<string, unknown>, { label }),
-	});
-}
-
-export function paidInferenceFetch(label: string) {
-	return createPaidFetch({
-		privateKey: () => config.privateKey,
-		budget: getBudgets().inference,
-		maxUsdPerPayment: `$${config.maxUsdPerInference}`,
-		label,
-		onReceipt: (ev) => ledger.record(label, ev),
-		onEvent: (ev) => logEvent('x402.payment', ev.ok, ev as unknown as Record<string, unknown>, { label }),
-	});
-}
+export const paidAlchemyFetch = (label: string) => paidFetch('alchemy', label, null);

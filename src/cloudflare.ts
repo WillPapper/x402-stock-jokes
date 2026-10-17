@@ -15,10 +15,31 @@
 //      which the `us` jurisdiction guarantees is in the US.
 //
 // So `submit()` only queues the message and sets an alarm; `alarm()` dispatches.
-import { dispatch } from '@flue/runtime';
+import { dispatch, setProvider } from '@flue/runtime';
 import { DurableObject } from 'cloudflare:workers';
 import { Joke } from './agents/joke.ts';
-import { logEvent } from './lib/log.ts';
+import { createX402AiGatewayProvider } from './lib/ai-gateway-provider.ts';
+import { whereAmI } from './lib/colo.ts';
+import { config, paidInferenceFetch } from './lib/env.ts';
+import { conversationScope, logEvent } from './lib/log.ts';
+import { finishRun, recordTurn } from './lib/runs.ts';
+
+// The agent's own model turns go through AI Gateway machine payments: every
+// chat-completions call pi-ai makes is rewritten to /ai/run and paid with x402.
+// Registered here, at Worker level, because the agent runs inside a Durable
+// Object and needs the provider before its first turn.
+setProvider(
+	createX402AiGatewayProvider({
+		accountId: () => config.accountId,
+		apiToken: () => config.apiToken,
+		paidFetch: paidInferenceFetch('AI Gateway orchestrator turn'),
+		onTurn: (t) => {
+			const conversationId = conversationScope.get();
+			logEvent('ai.turn', t.ok, { model: t.model, status: t.status, usage: t.usage ?? null, ids: t.ids, durationMs: t.durationMs, finishReason: t.finishReason ?? null, payment: t.description, ...(t.error ? { error: t.error } : {}) }, { conversationId, label: 'orchestrator turn' });
+			if (conversationId) void recordTurn(conversationId, t.ok, t.error).catch((err) => console.warn('recordTurn failed', (err as Error).message.slice(0, 120)));
+		},
+	}),
+);
 
 export interface SubmitRequest {
 	id: string;
@@ -56,22 +77,15 @@ export class JokeRunner extends DurableObject {
 				logEvent('gate', true, { probe: 'runner', from: 'alarm', jurisdiction: this.ctx.id.jurisdiction, runnerColo: where.colo, runnerCountry: where.loc, by: req.by, submissionId: receipt.submissionId, queuedMs: Date.now() - req.queuedAt }, { conversationId: req.id, label: 'runner dispatch' });
 			} catch (err) {
 				const attempts = req.attempts + 1;
-				logEvent('error', false, { where: 'runner-alarm', attempts, error: (err as Error).message.slice(0, 300) }, { conversationId: req.id, label: 'runner dispatch failed' });
-				if (attempts >= MAX_ATTEMPTS) await this.ctx.storage.delete(key);
-				else await this.ctx.storage.put<Pending>(key, { ...req, attempts });
+				const error = (err as Error).message.slice(0, 300);
+				logEvent('error', false, { where: 'runner-alarm', attempts, error }, { conversationId: req.id, label: 'runner dispatch failed' });
+				if (attempts >= MAX_ATTEMPTS) {
+					await this.ctx.storage.delete(key);
+					await finishRun(req.id, { state: 'failed', error: `the agent could not be started: ${error}` }).catch(() => undefined);
+				} else await this.ctx.storage.put<Pending>(key, { ...req, attempts });
 			}
 		}
 		const left = await this.ctx.storage.list<Pending>({ prefix: 'pending:' });
 		if (left.size > 0) await this.ctx.storage.setAlarm(Date.now() + 5000);
-	}
-}
-
-/** Which Cloudflare colo and country this isolate's outbound requests appear to come from. */
-export async function whereAmI(): Promise<{ colo: string | null; loc: string | null; ip: string | null }> {
-	try {
-		const t = Object.fromEntries((await (await fetch('https://www.cloudflare.com/cdn-cgi/trace')).text()).trim().split('\n').map((l) => l.split('=') as [string, string]));
-		return { colo: t.colo ?? null, loc: t.loc ?? null, ip: t.ip ?? null };
-	} catch {
-		return { colo: null, loc: null, ip: null };
 	}
 }

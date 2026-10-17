@@ -92,25 +92,3 @@ export async function listEvents(opts: { limit?: number; conversationId?: string
 	const { results } = await db.prepare(sql).bind(...binds).all<{ id: number; ts: string; kind: string; conversation_id: string | null; label: string | null; ok: number; data: string }>();
 	return results.map((r) => ({ id: r.id, ts: r.ts, kind: r.kind, conversationId: r.conversation_id, label: r.label, ok: r.ok === 1, data: JSON.parse(r.data) as Record<string, unknown> }));
 }
-
-/** Pull the Cloudflare identifiers off an upstream response for bug reports. */
-export function upstreamIds(res: Response): Record<string, string> {
-	const out: Record<string, string> = {};
-	for (const h of ['cf-ray', 'cf-aig-request-id', 'cf-aig-event-id', 'cf-aig-trace-id', 'cf-aig-log-id', 'cf-auditlog-id', 'api-version', 'x-request-id']) {
-		const v = res.headers.get(h);
-		if (v) out[h] = v;
-	}
-	return out;
-}
-
-/** Decode a JWT payload without verifying (for logging only). */
-export function jwtPayload(token: string | undefined | null): Record<string, unknown> | null {
-	if (!token) return null;
-	try {
-		const part = token.split('.')[1] ?? '';
-		const json = atob(part.replace(/-/g, '+').replace(/_/g, '/').padEnd(part.length + ((4 - (part.length % 4)) % 4), '='));
-		return JSON.parse(json) as Record<string, unknown>;
-	} catch {
-		return null;
-	}
-}

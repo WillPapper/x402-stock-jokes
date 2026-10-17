@@ -10,7 +10,8 @@
 import { env } from 'cloudflare:workers';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { claimPaymentToken } from './db.ts';
-import { jwtPayload, logEvent } from './log.ts';
+import { logEvent } from './log.ts';
+import { jwtPayload } from './upstream.ts';
 
 export const PASSWORD_HEADER = 'x-joke-password';
 export const PAYMENT_CONTEXT_HEADER = 'payment-context';
@@ -19,15 +20,6 @@ export const PUBLIC_HOST = 'jokes.papper.me';
 export const PRICE_USDC = '0.10';
 
 export type Access = { ok: true; by: 'password' | 'x402'; amount?: string } | { ok: false; status: 401 | 402; reason: string };
-
-/**
- * The URL the buyer actually paid for. `POST /joke/<TICKER>` forwards to the
- * gated agent route in-process; the forwarder records the original request URL
- * here so the PAYMENT-CONTEXT audience can be checked against what was paid
- * for, not against the internal URL. Keyed by the Request object itself, so
- * nothing a client sends can set it.
- */
-export const paidResource = new WeakMap<Request, string>();
 
 async function sha256Hex(text: string): Promise<string> {
 	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -57,7 +49,12 @@ function timingSafeEqual(a: string, b: string): boolean {
 	return diff === 0;
 }
 
-export async function checkAccess(request: Request, conversationId?: string): Promise<Access> {
+/**
+ * @param paidUrl The URL the buyer paid for when the request was forwarded
+ *   internally (`POST /joke/<TICKER>` starts the agent route in-process); the
+ *   PAYMENT-CONTEXT audience is checked against it, not the internal URL.
+ */
+export async function checkAccess(request: Request, conversationId?: string, paidUrl?: string): Promise<Access> {
 	const expected = (env as unknown as { JOKE_PASSWORD?: string }).JOKE_PASSWORD;
 	const url = new URL(request.url);
 	const cf = (request as Request & { cf?: { country?: string; colo?: string; asn?: number } }).cf;
@@ -81,7 +78,7 @@ export async function checkAccess(request: Request, conversationId?: string): Pr
 			jwks ??= createRemoteJWKSet(new URL(JWKS_URL));
 			const { payload, protectedHeader } = await jwtVerify(token, jwks, { algorithms: ['EdDSA'] });
 			const aud = Array.isArray(payload.aud) ? payload.aud[0] : payload.aud;
-			const resource = new URL(paidResource.get(request) ?? request.url);
+			const resource = new URL(paidUrl ?? request.url);
 			if (aud) {
 				const match = audienceMatches(aud, resource);
 				if (!match.ok) return done({ ok: false, status: 401, reason: match.why }, { claims, kid: protectedHeader.kid ?? null, resource: resource.pathname });

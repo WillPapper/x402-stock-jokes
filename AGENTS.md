@@ -5,12 +5,13 @@ This is a [Flue](https://flueframework.com) project: agents are TypeScript funct
 ## Layout
 
 - `src/agents/` — agent modules. A module whose first line is the `'use agent'` directive exports agents: every exported capitalized function is one, and the function name is its durable identity.
-- `src/app.ts` — the route map; every route is mounted here explicitly.
-- `src/cloudflare.ts` — Worker-level exports and non-HTTP handlers.
+- `src/app.ts` — the route map; it mounts `src/routes/agent.ts` (the gate, `/joke/<TICKER>`, `/joke/<id>`, `/agents/joke/*`), `src/routes/public.ts`, `src/routes/permalink.ts` and `src/routes/internal.ts`.
+- `src/cloudflare.ts` — Worker-level exports and non-HTTP handlers: the `JokeRunner` Durable Object and the x402 AI Gateway provider registration.
 - `wrangler.jsonc` — Worker config; every agent needs a Durable Object migration entry.
 - `src/lib/` — x402 client, budget, ledger, and the pi-ai provider that pays AI Gateway for the agent's own turns.
 - `src/tools/` — the three paid steps (StockTwits, Ceramic, AI Gateway joke).
-- `src/lib/access.ts` — who may POST a joke: password header, or a Monetization Gateway `PAYMENT-CONTEXT` JWT; `src/lib/db.ts` — D1 feed/cache; `public/index.html` — the page.
+- `src/lib/access.ts` — who may POST a joke: password header, or a Monetization Gateway `PAYMENT-CONTEXT` JWT; `src/lib/runs.ts` — the D1 `runs` and `run_payments` tables every run writes to (state, steps, payments) and `runStatus()`; `src/lib/db.ts` — D1 `jokes` feed/cache; `src/lib/persist.ts` — the joke row from the run; `public/index.html` — the page.
+- Run state is D1-only. Tools record their step with `setStep`, payments are stored by `paidFetch` (pass the conversation id), nothing is handed between tools and hooks in memory. Status is `statusOf()` in `src/lib/status.ts` (pure, tested).
 - The agent is `Joke` (`src/agents/joke.ts`, Durable Object class `FlueJokeAgent`, mounted at `/agents/joke`).
 - Every tool call and model turn spends real USDC; keep caps in `wrangler.jsonc` vars small and run `bun run doctor` first.
 
