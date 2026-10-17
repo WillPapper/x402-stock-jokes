@@ -240,7 +240,8 @@
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
-  const form = $('#form'), ticker = $('#ticker'), password = $('#password'), go = $('#go'), pwhint = $('#pwhint');
+  const form = $('#form'), ticker = $('#ticker'), go = $('#go'), pwhint = $('#pwhint');
+  let password = $('#password');   // replaced on every Show/Hide toggle, see remaskPassword
   const PW_HINT = 'Optional. Without one, your agent pays 0.10 USDC via x402.';
   const savedPassword = () => { try { return localStorage.getItem('joke-password') || ''; } catch { return ''; } };
   try { password.value = savedPassword(); } catch {}
@@ -258,25 +259,32 @@
   const normTicker = (v) => String(v || '').trim().toUpperCase().replace(/^\$/, '').replace(/[^A-Z0-9.]/g, '');
 
   // Coupon reveal toggle: the code is a password in all but name, so it is masked by default.
-  // Chrome does not always repaint a script-filled input when -webkit-text-security
-  // changes (the mask stays until the field is focused), so re-set the value to
-  // rebuild the field's text after every toggle, keeping any caret position.
-  const repaintMask = () => {
-    const v = password.value, focused = document.activeElement === password;
-    const [a, b] = focused ? [password.selectionStart, password.selectionEnd] : [null, null];
-    password.value = ''; void password.offsetWidth; password.value = v;
-    if (focused && a != null) try { password.setSelectionRange(a, b); } catch {}
+  // Chrome does not reliably repaint an input when -webkit-text-security changes:
+  // the old mask (or the old plain text) stays until the field is focused, and
+  // re-setting the value stopped being enough in Chrome 155. A brand-new element
+  // always paints with its current style, so each toggle swaps the field for a
+  // clone, keeping the value, the caret and the other classes.
+  const onPasswordInput = () => { if (pwhint.classList.contains('err')) setPwHint(PW_HINT, false); };
+  const remaskPassword = (masked) => {
+    const old = password, focused = document.activeElement === old;
+    const [a, b] = focused ? [old.selectionStart, old.selectionEnd] : [null, null];
+    const fresh = old.cloneNode(false);
+    fresh.classList.toggle('masked', masked);
+    fresh.value = old.value;
+    fresh.addEventListener('input', onPasswordInput);
+    old.replaceWith(fresh);
+    password = fresh;
+    if (focused) { fresh.focus(); if (a != null) try { fresh.setSelectionRange(a, b); } catch {} }
   };
   $('#reveal').addEventListener('click', () => {
     const show = password.classList.contains('masked');
-    password.classList.toggle('masked', !show);
-    repaintMask();
+    remaskPassword(!show);
     $('#reveal').textContent = show ? 'Hide' : 'Show';
     $('#reveal').setAttribute('aria-pressed', String(show));
     $('#reveal').setAttribute('aria-label', show ? 'Hide coupon code' : 'Show coupon code');
   });
   const setPwHint = (text, isError) => { pwhint.textContent = text; pwhint.classList.toggle('err', !!isError); password.classList.toggle('invalid', !!isError); };
-  password.addEventListener('input', () => { if (pwhint.classList.contains('err')) setPwHint(PW_HINT, false); });
+  password.addEventListener('input', onPasswordInput);
   const tickerhint = $('#tickerhint');
   function setTickerError(msg) { tickerhint.textContent = msg || ''; tickerhint.classList.toggle('hidden', !msg); ticker.classList.toggle('invalid', !!msg); ticker.setAttribute('aria-invalid', msg ? 'true' : 'false'); }
   ticker.addEventListener('input', () => { if (!tickerhint.classList.contains('hidden')) setTickerError(''); hideRecent(); });
