@@ -6,7 +6,7 @@
 
 ## Summary
 
-Our wallet signed in with SIWE, got the `402` "Purchase $1 of Alchemy API credits", and paid it. The payment settled on-chain: 1 USDC to the gateway's payee. The paid request answered `500 Internal error`. For about two minutes after that, the gateway gave mixed answers for the same wallet, and once it served a request without asking for payment. Since then it has quoted a new $1 top-up on every request, as if the wallet had never paid.
+Our wallet signed in with SIWE, got the `402` "Purchase $1 of Alchemy API credits", and paid it. The payment settled on-chain: 1 USDC to the gateway's payee. The paid request answered `500 Internal error`. For about two minutes after that, the gateway gave mixed answers for the same wallet, and once it served a request without asking for payment. Since then it has quoted a new $1 top-up on every JSON-RPC request, as if the wallet had never paid. On its REST routes it lets the wallet through, and Alchemy's backend refuses with "Monthly capacity limit exceeded". The wallet seems to have an account with no compute units (trace IDs below).
 
 **Requests:** please credit the $1 to this wallet's gateway balance, or refund it. Please also look at `eth_*` methods on `base-mainnet`: they answer `500 Internal error` after payment in both the credits and pay-per-request modes (two more payments of 0.001 USDC charged for failed requests, below).
 
@@ -41,6 +41,25 @@ Every request is a `POST https://x402.alchemy.com/base-mainnet/v2` carrying `Aut
 The responses carried no request-ID header. The only identifiers were `date` and `x-envoy-upstream-service-time`; `server` was `istio-envoy`.
 
 Unpaid check at 05:37:11: still `402` with the $1 quote for all three methods.
+
+## Follow-up, 06:02–06:04 UTC: the wallet has an account, but no capacity
+
+About 35 minutes after the payment we tried to use the credits again. Every request below was unpaid: plain HTTP, never a `Payment-Signature` header.
+
+| Route (signed in as our wallet) | Our wallet (paid $1) | A never-funded wallet |
+|---|---|---|
+| `POST /base-mainnet/v2`: `alchemy_getAssetTransfers`, `eth_blockNumber`, `alchemy_getTokenBalances` | `402`, $1 quote | `402`, $1 quote |
+| `POST /eth-mainnet/v2`: `eth_blockNumber` | `402`, $1 quote | — |
+| `GET /prices/v1/tokens/by-symbol?symbols=ETH` | **`429` "Monthly capacity limit exceeded"**, `x-alchemy-trace-id: b8eeaa5e-afe3-47b4-8b0b-5ad422b162b8` | `402`, $1 quote |
+| `POST /data/v1/assets/tokens/by-address` | **`429` "Monthly capacity limit exceeded"**, `x-alchemy-trace-id: d868e245-d2df-42d8-af22-40583ea4c5d0` | — |
+| `GET /base-mainnet/nft/v3/getNFTsForOwner` | **`429` "Monthly capacity limit exceeded"** | `402`, $1 quote |
+
+On the REST routes the gateway passes our wallet through: a wallet that never paid gets a `402` there instead. Alchemy's backend then refuses for capacity. So the payment created something for our wallet, but with no compute units behind it. The JSON-RPC routes don't see it at all and ask for another $1. The `403` "Monthly capacity limit exceeded" that `alchemy_getAssetTransfers` returned at 05:29:30 and 05:31:00 is the same backend refusal.
+
+It is not our client:
+- **Same sign-in token:** a token built exactly as `signSiwe` in [`@alchemy/x402`](https://www.npmjs.com/package/@alchemy/x402) 0.6.6 builds it (same message, base64url encoding) got the same answers as ours.
+- **Same request flow:** the gateway client in [`@alchemy/cli`](https://www.npmjs.com/package/@alchemy/cli) 0.25.1 (`X402Client`) makes the same calls we do. It sends `Authorization: SIWE <token>`, reuses one token for an hour, and on a `402` pays and retries with `Payment-Signature`.
+- **No balance endpoint:** the gateway has none we could check (`/balance`, `/credits`, `/account` answer `404`).
 
 ## Pay-per-request mode: the same methods fail after payment
 
