@@ -70,7 +70,7 @@ export const writeJoke = (conversationId: string) =>
 	defineTool({
 	name: 'write_joke',
 	description:
-		'Step 3. Pay Cloudflare AI Gateway (x402 machine payments, USDC on Base) to write the joke. Pass news: 2 to 4 one-sentence company news items from search_stock_news (the premise; prefer dated, concrete events); chatter: 0 to 2 trader quotes from fetch_stocktwits_signals, only if funny; price: the latest price. Do not pass counts, tallies, percentages or watchlist sizes. Call this last, exactly once; if it fails, report the failure instead of calling it again.',
+		'Step 3. Pay Cloudflare AI Gateway (x402 machine payments, USDC on Base) to write the joke. Pass news: 2 to 4 one-sentence company news items from search_stock_news (the premise; prefer dated, concrete events); chatter: 0 to 2 trader quotes from fetch_stocktwits_signals, only if funny; price: the latest price; exchange: the exchange from fetch_stocktwits_signals, when it has one. Do not pass counts, tallies, percentages or watchlist sizes. Call this last, exactly once; if it fails, report the failure instead of calling it again.',
 	input: v.pipe(
 		v.object({
 			symbol: v.pipe(v.string(), v.minLength(1), v.maxLength(12)),
@@ -78,13 +78,17 @@ export const writeJoke = (conversationId: string) =>
 			news: v.pipe(v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(300))), v.maxLength(5)),
 			chatter: v.optional(v.pipe(v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(300))), v.maxLength(3))),
 			price: v.optional(v.pipe(v.string(), v.maxLength(40))),
+			exchange: v.optional(v.pipe(v.string(), v.maxLength(40))),
 		}),
 		v.check((d) => d.news.length + (d.chatter?.length ?? 0) > 0, 'pass at least one news item or trader quote'),
 	),
 	durable: true,
 	async run({ data, step, log }) {
 		const symbol = data.symbol.toUpperCase();
-		const input: JokeInput = { ...data, symbol, company: data.company ?? handoff.title(symbol) };
+		// The exchange comes from the StockTwits step when the orchestrator leaves it out,
+		// so a listed company is never written up as if its IPO were still pending.
+		const listing = handoff.steps(conversationId)?.stocktwits as { exchange?: string | null } | undefined;
+		const input: JokeInput = { ...data, symbol, company: data.company ?? handoff.title(symbol), exchange: data.exchange ?? listing?.exchange ?? null };
 		const facts = factsFor(input);
 		logEvent('tool.start', true, { tool: 'write_joke', input: data, facts }, { conversationId, label: 'write_joke' });
 		try {

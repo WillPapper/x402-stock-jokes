@@ -8,6 +8,12 @@ describe('joke prompt', () => {
 		expect(p).toContain('- 2026-04-17 (6 months ago): SpaceX files for its IPO');
 		expect(p.indexOf('NEWS')).toBeLessThan(p.indexOf('Price:'));
 	});
+	test('names the exchange so a listed company is never written up as pre-IPO', () => {
+		const p = userPrompt({ symbol: 'SPCX', company: 'SpaceX', news: ['2026-04-08: Musk may use SPCX as the IPO ticker'], exchange: 'NASDAQ', today: '2026-10-17' });
+		expect(p.split('\n')[2]).toBe('Listed: SPCX trades on NASDAQ today, so the company is public.');
+		expect(userPrompt({ symbol: 'SPCX', news: ['x'], today: '2026-10-17' })).not.toContain('Listed:');
+		expect(SYSTEM).toMatch(/never frame the listing as pending/);
+	});
 	test('forbids current-tense framing of old items and statistics', () => {
 		expect(SYSTEM).toMatch(/older than a month is history/);
 		expect(SYSTEM).toMatch(/pending, upcoming, happening now/);
