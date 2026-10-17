@@ -31,7 +31,11 @@ export const handoff = {
 		steps.delete(conversationId);
 		return s;
 	},
-	/** Ledger position when the conversation started, so tools can total its payments so far. */
+	/**
+	 * Ledger position (`ledger.mark()`, our own counter, not Flue's) when the
+	 * conversation started, so tools and the finish hook can total its
+	 * payments so far. Missing after a Durable Object restart: defaults to 0.
+	 */
 	setMark: (conversationId: string, mark: number) => marks.set(conversationId, mark),
 	mark: (conversationId: string) => marks.get(conversationId) ?? 0,
 	takeMark: (conversationId: string) => {

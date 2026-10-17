@@ -25,6 +25,15 @@ export function Joke({ id }: { id: string }) {
 
 	// Attach every payment made during this response to the reply's metadata,
 	// and store the finished joke in D1 for the feed and the cache.
+	//
+	// "Ledger marks" are ours, not Flue's (src/lib/ledger.ts): a mark is the
+	// ledger's length at a moment, and `ledger.since(mark)` is what was paid
+	// after it. Two marks are taken. The conversation mark below lives in the
+	// in-memory hand-off and totals the whole run for the D1 row (write_joke
+	// and the finish hook both read it). The response mark in useResponseStart
+	// rides on the reply's metadata, which Flue persists in the record log, so
+	// useResponseFinish can list just that response's receipts. Both reset to
+	// zero if the Durable Object restarts mid-run; see the ledger header.
 	useAgentStart(async () => {
 		handoff.setMark(id, ledger.mark());
 		conversationScope.set(id);

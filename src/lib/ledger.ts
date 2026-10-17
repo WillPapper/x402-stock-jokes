@@ -1,8 +1,22 @@
 /**
  * In-isolate record of every x402 payment this Worker instance made, so the
- * agent can attach receipts to its reply and the page can show them. Durable
- * Objects keep an isolate warm for a conversation, so "since mark" covers one
- * response's payments reliably; the ledger is not a source of truth for money.
+ * agent can attach receipts to its reply and the page can show them. This is
+ * our code, not a Flue feature: Flue knows nothing about payments.
+ *
+ * A "mark" is just the ledger's length at some moment (`mark()`), and
+ * `since(mark)` returns the records appended after it. The agent takes two:
+ * one at agent start (kept in `handoff`, src/lib/drafts.ts) to total the whole
+ * conversation for the D1 row, and one per response (carried in the reply's
+ * metadata through Flue's `useResponseStart` → `useResponseFinish`) to attach
+ * that response's receipts to the reply. The ledger itself is a module-level
+ * array, so both marks assume the Durable Object keeps one isolate alive for
+ * the whole run, and that no other conversation pays from the same isolate.
+ *
+ * Known gaps (seen on a Nintendo run, 2026-10-17): a deploy mid-run restarts
+ * the isolate, which empties the array and the marks map, so `since(0)` in the
+ * resumed run only sees payments made after the restart and the row's
+ * `payments` miss the earlier ones. The `x402.payment` events in D1 are the
+ * durable record; the ledger is never a source of truth for money.
  */
 import type { ReceiptEvent } from './x402.ts';
 import { formatUsdc } from './budget.ts';
