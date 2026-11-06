@@ -28,7 +28,9 @@ This is a [Flue](https://flueframework.com) project: agents are TypeScript funct
 
 ## Cloudflare CLI
 
-Use the `cf` CLI (`npm i -g cf`, or `npx cf`) instead of `wrangler` whenever possible — e.g. `cf deploy`, `cf dev`, `cf build`. Fall back to `wrangler` only when `cf` has no equivalent command.
+Use the `cf` CLI (`npm i -g cf`, or `npx cf`) instead of `wrangler` whenever possible — e.g. `cf d1 query`, `cf workers secrets list`. Fall back to `wrangler` only when `cf` has no equivalent command.
+
+- **Deploy with `bun run deploy` (`wrangler deploy`), never `cf deploy`.** Flue requires Wrangler: `flueWorkerConfig()` injects the Worker entry and the agent Durable Object bindings into the `wrangler.jsonc` config through `@cloudflare/vite-plugin` 1.x. `cf` needs `cloudflare.config.ts` and the 2.0 beta plugin, whose `config` hook takes a different shape, and `flue()` fails the build when its customizer does not run (checked 2026-11-06 with `cf` 1.0.0-beta.17, `@flue/vite` 2.3.0, plugin `2.0.0-beta.v.12`). The same goes for `cf dev`, `cf build` and `cf migrate`: without `cloudflare.config.ts` they fail ("multiple frameworks were found") or write a config that ignores `wrangler.jsonc`.
 
 - `cf cli search "<task>"` — discover commands instead of chaining `--help` calls; then run `<command> --help` for details.
 - `cf docs search "<question>"` — search the Cloudflare docs.
