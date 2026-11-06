@@ -1,5 +1,7 @@
 /**
- * Step 1: StockTwits through the Cloudflare Monetization Gateway preview.
+ * Step 1: StockTwits through the Cloudflare Monetization Gateway. The preview
+ * host (api-staging-mgw) stopped resolving on 2026-11-05; api-mgw serves the
+ * same quote (0.001 USDC to the same payTo).
  *
  * Paid (x402 exact, 0.001 USDC): GET /api/2/symbols/show/{SYM}.json — the only
  * origin route the preview serves (trending and friends 404 after payment,
@@ -18,7 +20,7 @@ import { logEvent } from '../lib/log.ts';
 import { setStep } from '../lib/runs.ts';
 import { decodePaymentRequired } from '../lib/x402.ts';
 
-export const STOCKTWITS_GATEWAY = 'https://api-staging-mgw.stocktwits.com';
+export const STOCKTWITS_GATEWAY = 'https://api-mgw.stocktwits.com';
 
 interface ShowResponse {
 	symbol?: { symbol?: string; title?: string; exchange?: string; instrument_class?: string; watchlist_count?: number; has_pricing?: boolean; trade_status?: string; live_event?: boolean };

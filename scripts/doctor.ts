@@ -46,8 +46,8 @@ async function quote(label: string, url: string, init?: RequestInit) {
 	ok(`${label}: ${q.scheme} ${formatUsdc(BigInt(q.amount))} USDC on ${q.network}`);
 }
 
-await quote('StockTwits symbols/trending', 'https://api-staging-mgw.stocktwits.com/api/2/symbols/trending/AAPL.json');
-await quote('StockTwits symbols/show', 'https://api-staging-mgw.stocktwits.com/api/2/symbols/show/AAPL.json');
+await quote('StockTwits symbols/trending', 'https://api-mgw.stocktwits.com/api/2/symbols/trending/AAPL.json');
+await quote('StockTwits symbols/show', 'https://api-mgw.stocktwits.com/api/2/symbols/show/AAPL.json');
 await quote('Ceramic search', 'https://api.ceramic.ai/search', {
 	method: 'POST',
 	headers: { 'content-type': 'application/json' },
