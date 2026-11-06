@@ -7,9 +7,11 @@
  * origin route the preview serves (trending and friends 404 after payment,
  * verified 2026-10-16). It returns symbol metadata.
  *
- * Free on the same gateway host: GET /api/2/streams/symbol/{SYM}.json — the 30
+ * Free on the public API host: GET /api/2/streams/symbol/{SYM}.json — the 30
  * latest messages with per-message Bullish/Bearish labels and the price at
  * post time. That is where the "price movements and sentiment" come from.
+ * (The preview gateway passed this route through for free; api-mgw's WAF
+ * blocks it, verified 2026-11-06, so it comes from api.stocktwits.com.)
  */
 import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
@@ -21,6 +23,7 @@ import { setStep } from '../lib/runs.ts';
 import { decodePaymentRequired } from '../lib/x402.ts';
 
 export const STOCKTWITS_GATEWAY = 'https://api-mgw.stocktwits.com';
+export const STOCKTWITS_PUBLIC = 'https://api.stocktwits.com';
 
 interface ShowResponse {
 	symbol?: { symbol?: string; title?: string; exchange?: string; instrument_class?: string; watchlist_count?: number; has_pricing?: boolean; trade_status?: string; live_event?: boolean };
@@ -138,7 +141,7 @@ export async function tickerKnown(symbol: string): Promise<boolean | null> {
 	const cached = tickerChecks.get(sym);
 	if (cached && cached.until > Date.now()) return cached.known;
 	try {
-		const res = await fetch(`${STOCKTWITS_GATEWAY}/api/2/streams/symbol/${sym}.json`, { signal: AbortSignal.timeout(5000) });
+		const res = await fetch(`${STOCKTWITS_PUBLIC}/api/2/streams/symbol/${sym}.json`, { signal: AbortSignal.timeout(5000) });
 		if (res.status === 404) {
 			tickerChecks.set(sym, { known: false, until: Date.now() + UNKNOWN_TTL_MS });
 			return false;
@@ -173,7 +176,9 @@ export async function fetchStocktwitsSignalsFor(symbol: string, conversationId?:
 	const show = (await showRes.json()) as ShowResponse;
 
 	const free = paidDataFetch(`StockTwits streams/symbol/${sym} (free)`, conversationId);
-	const streamRes = await free(`${STOCKTWITS_GATEWAY}/api/2/streams/symbol/${sym}.json`);
+	const streamRes = await free(`${STOCKTWITS_PUBLIC}/api/2/streams/symbol/${sym}.json`);
+	// Without the stream the joke has no price, mood or quotes; say so instead of passing it off as a quiet room.
+	if (!streamRes.ok) logEvent('error', false, { tool: 'fetch_stocktwits_signals', stream: streamRes.status, cfRay: streamRes.headers.get('cf-ray') }, { conversationId, label: 'stocktwits stream failed' });
 	const stream: StreamResponse = streamRes.ok ? ((await streamRes.json()) as StreamResponse) : {};
 	const messages = stream.messages ?? [];
 
